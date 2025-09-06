@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
 import * as fal from '@fal-ai/serverless-client';
 
-// Your API keys from the .env file
 const API_KEY = import.meta.env.VITE_GOOGLE_AI_API_KEY;
 
 const App: React.FC = () => {
@@ -15,9 +14,6 @@ const App: React.FC = () => {
     const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
     const [capturedImage, setCapturedImage] = useState<string | null>(null);
     const [segments, setSegments] = useState<any[] | null>(null);
-    
-    // THIS STATE VARIABLE IS REQUIRED FOR THE CAMERA FIX
-    const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -25,103 +21,88 @@ const App: React.FC = () => {
     const ai = new GoogleGenAI({ apiKey: API_KEY });
     const categories = ['Modern', 'Minimalist', 'Bohemian', 'Coastal', 'Industrial', 'Farmhouse'];
 
-    // THIS HOOK FIXES THE BLANK VIDEO BUG IN SAFARI
+    // --- THIS IS THE FINAL, SAFARI-SAFE CAMERA EFFECT HOOK ---
     useEffect(() => {
-        if (mediaStream && videoRef.current) {
-            videoRef.current.srcObject = mediaStream;
-            videoRef.current.play().catch(e => console.error("Video play failed:", e));
-        }
-        return () => {
-            if (mediaStream) {
-                mediaStream.getTracks().forEach(track => track.stop());
+        let stream: MediaStream | null = null;
+
+        const startCamera = async () => {
+            if (!isCameraActive || !videoRef.current) {
+                return;
             }
-        };
-    }, [mediaStream]);
 
-    // THIS IS THE UPDATED stopCamera FUNCTION
-    const stopCamera = () => {
-        setMediaStream(null); // This triggers the useEffect cleanup
-        setIsCameraActive(false);
-    };
-
-    // THIS IS THE ROBUST PARSING FUNCTION THAT FIXES THE "INVALID IMAGE FORMAT" BUG IN SAFARI
-    const parseDataUrl = (dataUrl: string): { mimeType: string; data: string } | null => {
-        if (!dataUrl.startsWith('data:image')) {
-            console.error("Invalid data URL start", dataUrl);
-            return null;
-        }
-        const commaIndex = dataUrl.indexOf(',');
-        if (commaIndex === -1) {
-            console.error("Data URL does not contain a comma", dataUrl);
-            return null;
-        }
-        const header = dataUrl.substring(0, commaIndex);
-        const data = dataUrl.substring(commaIndex + 1);
-        const mimeMatch = header.match(/:(image\/\w+);/);
-        if (!mimeMatch || !mimeMatch[1]) {
-            console.error("Could not extract MIME type from header", header);
-            return null;
-        }
-        const mimeType = mimeMatch[1];
-        return { mimeType, data };
-    };
-
-    const handleGenerateImage = async () => {
-        if (API_KEY === "YOUR_GOOGLE_AI_API_KEY") {
-            setError("Please replace 'YOUR_GOOGLE_AI_API_KEY' in the code with your actual API key.");
-            return;
-        }
-        setLoading(true);
-        setError(null);
-        setImageUrl(null);
-        setCapturedImage(null);
-        setSegments(null);
-        try {
-            const response = await ai.models.generateImages({
-                model: 'imagen-4.0-generate-001',
-                prompt: `A high-resolution, photorealistic image of a ${selectedCategory} style room.`,
-                config: { numberOfImages: 1, outputMimeType: 'image/jpeg', aspectRatio: '16:9' },
-            });
-            if (response.generatedImages && response.generatedImages.length > 0) {
-                const base64Image = response.generatedImages[0].image.imageBytes;
-                setImageUrl(`data:image/jpeg;base64,${base64Image}`);
-            } else {
-                throw new Error("No image was generated.");
-            }
-        } catch (err) {
-            console.error(err);
-            setError("Failed to generate image. Please check your API key and try again.");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // THIS IS THE UPDATED handleStartCamera FUNCTION
-    const handleStartCamera = async () => {
-        setError(null);
-        setCapturedImage(null);
-        setImageUrl(null);
-        setSegments(null);
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            setError(null);
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-                setMediaStream(stream);
-                setIsCameraActive(true);
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: "environment" } },
+                    audio: false,
+                });
+
+                const video = videoRef.current;
+
+                // Use requestAnimationFrame to ensure the video element is painted before attaching the stream
+                requestAnimationFrame(() => {
+                    if (video) {
+                        video.srcObject = stream;
+                        video.onloadedmetadata = () => {
+                            video.play().catch(err => {
+                                console.error("Safari play() failed:", err);
+                                setError("Could not start camera feed. Please check browser permissions.");
+                            });
+                        };
+                    }
+                });
             } catch (err: any) {
                 console.error("Camera access error:", err.name, err.message);
                 if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-                    setError("Camera access was denied. Please allow camera access for this site in your browser settings.");
-                } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-                    setError("No camera was found on your device.");
+                    setError("Camera access was denied.");
                 } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
-                    setError("Camera is already in use by another application. Please close it and try again.");
+                    setError("Camera is already in use by another app.");
                 } else {
-                    setError("An unknown error occurred while trying to access the camera.");
+                    setError("Could not access camera.");
                 }
+                setIsCameraActive(false); // Reset state on failure
             }
-        } else {
-            setError("Your browser does not support camera access.");
-        }
+        };
+
+        startCamera();
+
+        // This is the cleanup function. It runs when isCameraActive becomes false.
+        return () => {
+            if (stream) {
+                stream.getTracks().forEach((track) => track.stop());
+            }
+        };
+    }, [isCameraActive]);
+
+
+    const stopCamera = () => {
+        setIsCameraActive(false); // This triggers the useEffect cleanup
+    };
+
+    const parseDataUrl = (dataUrl: string): { mimeType: string; data: string } | null => {
+        const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+        if (!match) return null;
+        return { mimeType: match[1], data: match[2] };
+    };
+
+    const handleGenerateImage = async () => {
+        setLoading(true); setError(null); setImageUrl(null); setCapturedImage(null); setSegments(null);
+        try {
+            const response = await ai.models.generateImages({ model: 'imagen-4.0-generate-001', prompt: `A high-resolution, photorealistic image of a ${selectedCategory} style room.`, config: { numberOfImages: 1, outputMimeType: 'image/jpeg', aspectRatio: '16:9' } });
+            if (response.generatedImages && response.generatedImages.length > 0) {
+                const base64Image = response.generatedImages[0].image.imageBytes;
+                setImageUrl(`data:image/jpeg;base64,${base64Image}`);
+            } else { throw new Error("No image was generated."); }
+        } catch (err) { console.error(err); setError("Failed to generate image. Please check your API key and try again.");
+        } finally { setLoading(false); }
+    };
+
+    const handleStartCamera = () => {
+        setError(null);
+        setCapturedImage(null);
+        setImageUrl(null);
+        setSegments(null);
+        setIsCameraActive(true);
     };
 
     const handleTakePicture = () => {
@@ -141,39 +122,19 @@ const App: React.FC = () => {
     };
 
     const handleRedesignImage = async () => {
-        if (!capturedImage) {
-            setError("Please capture an image first.");
-            return;
-        }
-        setLoading(true);
-        setError(null);
-        setImageUrl(null);
+        if (!capturedImage) { setError("Please capture an image first."); return; }
+        setLoading(true); setError(null); setImageUrl(null);
         const parsedImage = parseDataUrl(capturedImage);
-        if (!parsedImage) {
-            setError("Invalid image format.");
-            setLoading(false);
-            return;
-        }
+        if (!parsedImage) { setError("Invalid image format."); setLoading(false); return; }
         try {
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-image-preview',
-                contents: { parts: [ { inlineData: { data: parsedImage.data, mimeType: parsedImage.mimeType } }, { text: `Redesign this room in a ${selectedCategory} style. Keep the original room structure and furniture layout but change the wall colors, furniture style, decorations, and lighting to match the new style.` }, ] },
-                config: { responseModalities: [Modality.IMAGE, Modality.TEXT] },
-            });
+            const response = await ai.models.generateContent({ model: 'gemini-2.5-flash-image-preview', contents: { parts: [ { inlineData: { data: parsedImage.data, mimeType: parsedImage.mimeType } }, { text: `Redesign this room in a ${selectedCategory} style. Keep the original room structure and furniture layout but change the wall colors, furniture style, decorations, and lighting to match the new style.` }, ] }, config: { responseModalities: [Modality.IMAGE, Modality.TEXT] } });
             const imagePart = response.candidates?.[0]?.content?.parts?.find(part => part.inlineData);
             if (imagePart?.inlineData) {
                 const { data, mimeType } = imagePart.inlineData;
                 setImageUrl(`data:${mimeType};base64,${data}`);
-            } else {
-                throw new Error("The AI did not return a redesigned image.");
-            }
-        } catch (err) {
-            console.error(err);
-            setError("Failed to redesign image. Please check your API key and try again.");
-        } finally {
-            setLoading(false);
-            setCapturedImage(null);
-        }
+            } else { throw new Error("The AI did not return a redesigned image."); }
+        } catch (err) { console.error(err); setError("Failed to redesign image. Please check your API key and try again.");
+        } finally { setLoading(false); setCapturedImage(null); }
     };
 
     const switchMode = (newMode: 'generate' | 'redesign') => {
@@ -225,11 +186,12 @@ const App: React.FC = () => {
 
     const handleSegmentImage = async () => {
         if (!imageUrl) return;
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
         setLoading(true);
         setError(null);
         setSegments(null);
         try {
-            const response = await fetch('http://127.0.0.1:8000/segment', {
+            const response = await fetch(`${API_BASE_URL}/segment`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ image_url: imageUrl }),
@@ -249,11 +211,12 @@ const App: React.FC = () => {
 
     const handleRecolorObject = async (segment: any) => {
         if (!imageUrl) return;
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
         const newColor: [number, number, number] = [139, 92, 246];
         setLoading(true);
         setError(null);
         try {
-            const response = await fetch('http://127.0.0.1:8000/recolor', {
+            const response = await fetch(`${API_BASE_URL}/recolor`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -299,7 +262,7 @@ const App: React.FC = () => {
             );
         }
         if (isCameraActive) {
-            return <video ref={videoRef} className="w-full h-full object-contain" autoPlay playsInline muted onCanPlay={(e) => e.currentTarget.play()} />;
+            return <video ref={videoRef} className="w-full h-full object-contain" autoPlay playsInline muted />;
         }
         if (imageUrl) {
             return <img src={imageUrl} alt="Generated room" className="w-full h-full object-contain" />;
@@ -340,48 +303,128 @@ const App: React.FC = () => {
                 <h1 className="text-4xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-600">
                     AI Room Designer
                 </h1>
-                <p className="text-gray-400 mt-2 text-lg">Create or reimagine your perfect space with AI.</p>
+                <p className="text-gray-400 mt-2 text-lg">
+                    Create or reimagine your perfect space with AI.
+                </p>
             </header>
+    
             <main className="w-full max-w-5xl flex-1 flex flex-col bg-gray-800 rounded-2xl shadow-2xl overflow-hidden">
                 <div className="p-6 border-b border-gray-700">
                     <div className="flex bg-gray-900 rounded-lg p-1 space-x-1 mb-6">
-                        <button onClick={() => switchMode('generate')} className={`w-1/2 py-2.5 text-sm font-medium leading-5 rounded-lg transition-colors duration-300 ${mode === 'generate' ? 'bg-indigo-600 text-white shadow' : 'text-gray-300 hover:bg-gray-700'}`}> Generate New </button>
-                        <button onClick={() => switchMode('redesign')} className={`w-1/2 py-2.5 text-sm font-medium leading-5 rounded-lg transition-colors duration-300 ${mode === 'redesign' ? 'bg-indigo-600 text-white shadow' : 'text-gray-300 hover:bg-gray-700'}`}> Redesign My Room </button>
+                        <button
+                            onClick={() => switchMode('generate')}
+                            className={`w-1/2 py-2.5 text-sm font-medium leading-5 rounded-lg transition-colors duration-300 ${
+                                mode === 'generate'
+                                    ? 'bg-indigo-600 text-white shadow'
+                                    : 'text-gray-300 hover:bg-gray-700'
+                            }`}
+                        >
+                            Generate New
+                        </button>
+                        <button
+                            onClick={() => switchMode('redesign')}
+                            className={`w-1/2 py-2.5 text-sm font-medium leading-5 rounded-lg transition-colors duration-300 ${
+                                mode === 'redesign'
+                                    ? 'bg-indigo-600 text-white shadow'
+                                    : 'text-gray-300 hover:bg-gray-700'
+                            }`}
+                        >
+                            Redesign My Room
+                        </button>
                     </div>
-                    <h2 className="text-xl font-semibold mb-3 text-gray-200">Choose a Style</h2>
+    
+                    <h2 className="text-xl font-semibold mb-3 text-gray-200">
+                        Choose a Style
+                    </h2>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                        {categories.map(category => ( <button key={category} onClick={() => setSelectedCategory(category)} className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${selectedCategory === category ? 'bg-indigo-500 text-white ring-2 ring-indigo-400 shadow-md' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`} > {category} </button> ))}
+                        {categories.map(category => (
+                            <button
+                                key={category}
+                                onClick={() => setSelectedCategory(category)}
+                                className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${
+                                    selectedCategory === category
+                                        ? 'bg-indigo-500 text-white ring-2 ring-indigo-400 shadow-md'
+                                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                }`}
+                            >
+                                {category}
+                            </button>
+                        ))}
                     </div>
                 </div>
+    
                 <div className="flex-1 bg-gray-900 p-2 min-h-[300px] sm:min-h-[400px] lg:min-h-[500px]">
                     <div className="bg-black w-full h-full rounded-lg flex items-center justify-center relative">
                         {renderContent()}
                         <canvas ref={canvasRef} className="hidden"></canvas>
                     </div>
                 </div>
-                {error && <div className="p-4 bg-red-900 text-red-200 text-center">{error}</div>}
+    
+                {error && (
+                    <div className="p-4 bg-red-900 text-red-200 text-center">
+                        {error}
+                    </div>
+                )}
+    
                 <footer className="p-6 border-t border-gray-700">
-                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
                         <div className="sm:col-span-1"></div>
-                        <div className="sm:col-span-1">
-                           {renderActionButton()}
-                        </div>
+                        <div className="sm:col-span-1">{renderActionButton()}</div>
                         <div className="sm:col-span-1 flex justify-center sm:justify-end space-x-3">
-                             {imageUrl && (
+                            {imageUrl && (
                                 <>
-                                    <button onClick={handleSaveImage} className="flex items-center space-x-2 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                    <button
+                                        onClick={handleSaveImage}
+                                        className="flex items-center space-x-2 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            className="h-5 w-5"
+                                            viewBox="0 0 20 20"
+                                            fill="currentColor"
+                                        >
+                                            <path
+                                                fillRule="evenodd"
+                                                d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"
+                                                clipRule="evenodd"
+                                            />
+                                        </svg>
                                         <span>Save</span>
                                     </button>
-                                    
-                                    <button onClick={handleSegmentImage} className="flex items-center space-x-2 bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" /></svg>
+    
+                                    <button
+                                        onClick={handleSegmentImage}
+                                        className="flex items-center space-x-2 bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            className="h-5 w-5"
+                                            viewBox="0 0 20 20"
+                                            fill="currentColor"
+                                        >
+                                            <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
+                                            <path
+                                                fillRule="evenodd"
+                                                d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"
+                                                clipRule="evenodd"
+                                            />
+                                        </svg>
                                         <span>Magic Edit</span>
                                     </button>
-
+    
                                     {navigator.share && (
-                                        <button onClick={handleShareImage} className="flex items-center space-x-2 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300">
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.895-1.789l-4.94-2.47a3.027 3.027 0 000-.74l4.94-2.47C13.456 7.68 14.19 8 15 8z" /></svg>
+                                        <button
+                                            onClick={handleShareImage}
+                                            className="flex items-center space-x-2 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                className="h-5 w-5"
+                                                viewBox="0 0 20 20"
+                                                fill="currentColor"
+                                            >
+                                                <path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.895-1.789l-4.94-2.47a3.027 3.027 0 000-.74l4.94-2.47C13.456 7.68 14.19 8 15 8z" />
+                                            </svg>
                                             <span>Share</span>
                                         </button>
                                     )}
@@ -393,6 +436,6 @@ const App: React.FC = () => {
             </main>
         </div>
     );
-}
-
+};
+    
 export default App;
