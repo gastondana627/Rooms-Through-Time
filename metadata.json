@@ -1,0 +1,7 @@
+{
+  "name": "AI Room Designer",
+  "description": "An application that generates beautiful, AI-powered images of rooms based on different style categories like Modern, Minimalist, and Bohemian.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
