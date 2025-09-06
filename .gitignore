@@ -110,3 +110,7 @@ dist-ssr
 # Svelte Sapper auto-generated files
 __sapper__/
 .svelte-kit/
+
+
+# Python backend virtual environment
+backend/venv/
