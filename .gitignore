@@ -114,3 +114,7 @@ __sapper__/
 
 # Python backend virtual environment
 backend/venv/
+
+# Python Caches
+__pycache__/
+*.pyc

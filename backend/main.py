@@ -1,10 +1,15 @@
 import base64
 import io
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image
 import fal_serverless
+from dotenv import load_dotenv
+
+# Load environment variables from a .env file
+load_dotenv()
 
 # --- Pydantic Models for Request Data ---
 class ImageUrlInput(BaseModel):
@@ -27,15 +32,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Initialize Fal Client ---
-fal_serverless.config(
-    credentials="FAL_AI_KEY:FAL_AI_SECRET" # Replace with your actual Fal key/secret if needed
-)
+# NOTE: The fal-serverless client now automatically uses the FAL_TOKEN 
+# from the environment, which is loaded by load_dotenv(). 
+# No explicit .config() call is needed.
 
 # --- API Endpoint 1: Segment Image ---
 @app.post("/segment")
 def segment_image(input: ImageUrlInput):
     """Takes an image URL and returns a list of segmented objects."""
+    # Check if the key is loaded, provide a helpful error if not
+    if not os.getenv("FAL_TOKEN"):
+        print("ERROR: FAL_TOKEN not found. Make sure it is set in your backend/.env file.")
+        return {"error": "Server is missing Fal AI credentials."}
+        
     print("Received request to segment image...")
     result = fal_serverless.run(
         "fal-ai/fast-segment-anything",
@@ -61,7 +70,7 @@ def recolor_object(input: RecolorInput):
     original_image = decode_base64_image(input.image_url)
 
     # 2. Create the mask from the segmentation data
-    mask_data = base64.b64decode(input.mask['mask'])
+    mask_data = base64.b6.b64decode(input.mask['mask'])
     mask_image = Image.open(io.BytesIO(mask_data)).convert("L") # Grayscale mask
     
     # 3. Create a solid color layer
