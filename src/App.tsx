@@ -1,441 +1,599 @@
+/* src/App.tsx */
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI, Modality } from '@google/genai';
 import * as fal from '@fal-ai/serverless-client';
+
+/* --------------------------------------------------------------
+   Do **NOT** import '@google/model-viewer' – the component is loaded
+   from the <script> tag in index.html.  The TypeScript declaration
+   lives in src/model-viewer.d.ts, so the JSX tag is recognised.
+-------------------------------------------------------------- */
 
 const API_KEY = import.meta.env.VITE_GOOGLE_AI_API_KEY;
 
+/* ==============================================================
+   MAIN COMPONENT
+   ============================================================== */
 const App: React.FC = () => {
-    // --- STATE ---
-    const [loading, setLoading] = useState<boolean>(false);
-    const [error, setError] = useState<string | null>(null);
-    const [imageUrl, setImageUrl] = useState<string | null>(null);
-    const [mode, setMode] = useState<'generate' | 'redesign'>('generate');
-    const [selectedCategory, setSelectedCategory] = useState<string>('Modern');
-    const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
-    const [capturedImage, setCapturedImage] = useState<string | null>(null);
-    const [segments, setSegments] = useState<any[] | null>(null);
+  // -------------------------- STATE --------------------------
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [mode, setMode] = useState<'generate' | 'redesign'>('generate');
+  const [selectedCategory, setSelectedCategory] = useState<string>('Modern');
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [segments, setSegments] = useState<any[] | null>(null);
+  const [reconstructionUrl, setReconstructionUrl] = useState<string | null>(null);
 
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-    const ai = new GoogleGenAI({ apiKey: API_KEY });
-    const categories = ['Modern', 'Minimalist', 'Bohemian', 'Coastal', 'Industrial', 'Farmhouse'];
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
+  const categories = [
+    'Modern',
+    'Minimalist',
+    'Bohemian',
+    'Coastal',
+    'Industrial',
+    'Farmhouse',
+  ];
 
-    // --- THIS IS THE FINAL, SAFARI-SAFE CAMERA EFFECT HOOK ---
-    useEffect(() => {
-        let stream: MediaStream | null = null;
+  // -------------------------- API BASE URL --------------------------
+  const isDevelopment = import.meta.env.DEV;
+  const isLocalhost =
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1';
+  const API_BASE_URL = isDevelopment && isLocalhost
+    ? 'http://127.0.0.1:8000'
+    : (import.meta.env.VITE_API_BASE_URL || 'https://your-production-api.com');
 
-        const startCamera = async () => {
-            if (!isCameraActive || !videoRef.current) {
-                return;
-            }
-
-            setError(null);
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: { ideal: "environment" } },
-                    audio: false,
-                });
-
-                const video = videoRef.current;
-
-                // Use requestAnimationFrame to ensure the video element is painted before attaching the stream
-                requestAnimationFrame(() => {
-                    if (video) {
-                        video.srcObject = stream;
-                        video.onloadedmetadata = () => {
-                            video.play().catch(err => {
-                                console.error("Safari play() failed:", err);
-                                setError("Could not start camera feed. Please check browser permissions.");
-                            });
-                        };
-                    }
-                });
-            } catch (err: any) {
-                console.error("Camera access error:", err.name, err.message);
-                if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-                    setError("Camera access was denied.");
-                } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
-                    setError("Camera is already in use by another app.");
-                } else {
-                    setError("Could not access camera.");
-                }
-                setIsCameraActive(false); // Reset state on failure
-            }
-        };
-
-        startCamera();
-
-        // This is the cleanup function. It runs when isCameraActive becomes false.
-        return () => {
-            if (stream) {
-                stream.getTracks().forEach((track) => track.stop());
-            }
-        };
-    }, [isCameraActive]);
-
-
-    const stopCamera = () => {
-        setIsCameraActive(false); // This triggers the useEffect cleanup
-    };
-
-    const parseDataUrl = (dataUrl: string): { mimeType: string; data: string } | null => {
-        const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
-        if (!match) return null;
-        return { mimeType: match[1], data: match[2] };
-    };
-
-    const handleGenerateImage = async () => {
-        setLoading(true); setError(null); setImageUrl(null); setCapturedImage(null); setSegments(null);
-        try {
-            const response = await ai.models.generateImages({ model: 'imagen-4.0-generate-001', prompt: `A high-resolution, photorealistic image of a ${selectedCategory} style room.`, config: { numberOfImages: 1, outputMimeType: 'image/jpeg', aspectRatio: '16:9' } });
-            if (response.generatedImages && response.generatedImages.length > 0) {
-                const base64Image = response.generatedImages[0].image.imageBytes;
-                setImageUrl(`data:image/jpeg;base64,${base64Image}`);
-            } else { throw new Error("No image was generated."); }
-        } catch (err) { console.error(err); setError("Failed to generate image. Please check your API key and try again.");
-        } finally { setLoading(false); }
-    };
-
-    const handleStartCamera = () => {
+  // -------------------------- CAMERA HOOK --------------------------
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    const startCamera = async () => {
+      if (isCameraActive && videoRef.current) {
         setError(null);
-        setCapturedImage(null);
-        setImageUrl(null);
-        setSegments(null);
-        setIsCameraActive(true);
-    };
-
-    const handleTakePicture = () => {
-        if (videoRef.current && canvasRef.current) {
-            const video = videoRef.current;
-            const canvas = canvasRef.current;
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const context = canvas.getContext('2d');
-            if (context) {
-                context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const dataUrl = canvas.toDataURL('image/jpeg');
-                setCapturedImage(dataUrl);
-                stopCamera();
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' } },
+            audio: false,
+          });
+          const video = videoRef.current;
+          requestAnimationFrame(() => {
+            if (video) {
+              video.srcObject = stream;
+              video.onloadedmetadata = () => {
+                video
+                  .play()
+                  .catch(err => {
+                    console.error('Video play failed:', err);
+                    setError('Could not start camera feed.');
+                  });
+              };
             }
+          });
+        } catch (err: any) {
+          console.error('Camera access error:', err.name, err.message);
+          if (
+            err.name === 'NotAllowedError' ||
+            err.name === 'PermissionDeniedError'
+          ) {
+            setError('Camera access was denied.');
+          } else if (
+            err.name === 'NotReadableError' ||
+            err.name === 'TrackStartError'
+          ) {
+            setError('Camera is already in use by another app.');
+          } else {
+            setError('Could not access camera.');
+          }
+          setIsCameraActive(false);
         }
+      }
     };
-
-    const handleRedesignImage = async () => {
-        if (!capturedImage) { setError("Please capture an image first."); return; }
-        setLoading(true); setError(null); setImageUrl(null);
-        const parsedImage = parseDataUrl(capturedImage);
-        if (!parsedImage) { setError("Invalid image format."); setLoading(false); return; }
-        try {
-            const response = await ai.models.generateContent({ model: 'gemini-2.5-flash-image-preview', contents: { parts: [ { inlineData: { data: parsedImage.data, mimeType: parsedImage.mimeType } }, { text: `Redesign this room in a ${selectedCategory} style. Keep the original room structure and furniture layout but change the wall colors, furniture style, decorations, and lighting to match the new style.` }, ] }, config: { responseModalities: [Modality.IMAGE, Modality.TEXT] } });
-            const imagePart = response.candidates?.[0]?.content?.parts?.find(part => part.inlineData);
-            if (imagePart?.inlineData) {
-                const { data, mimeType } = imagePart.inlineData;
-                setImageUrl(`data:${mimeType};base64,${data}`);
-            } else { throw new Error("The AI did not return a redesigned image."); }
-        } catch (err) { console.error(err); setError("Failed to redesign image. Please check your API key and try again.");
-        } finally { setLoading(false); setCapturedImage(null); }
+    startCamera();
+    return () => {
+      if (stream) stream.getTracks().forEach(t => t.stop());
     };
+  }, [isCameraActive]);
 
-    const switchMode = (newMode: 'generate' | 'redesign') => {
-        setMode(newMode);
-        setError(null);
-        setImageUrl(null);
-        setCapturedImage(null);
+  const stopCamera = () => setIsCameraActive(false);
+
+  // -------------------------- HELPERS --------------------------
+  const parseDataUrl = (dataUrl: string) => {
+    const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!match) return null;
+    return { mimeType: match[1], data: match[2] };
+  };
+
+  // -------------------------- AI HANDLERS --------------------------
+
+  /** ------------ Generate a fresh image (Imagen) ------------ */
+  const handleGenerateImage = async () => {
+    setLoading(true);
+    setError(null);
+    setImageUrl(null);
+    setCapturedImage(null);
+    setSegments(null);
+    setReconstructionUrl(null);
+    try {
+      const response = await ai.models.generateImages({
+        model: 'imagen-4.0-generate-001',
+        prompt: `A high‑resolution, photorealistic image of a ${selectedCategory} style room.`,
+        config: {
+          numberOfImages: 1,
+          outputMimeType: 'image/jpeg',
+          aspectRatio: '16:9',
+        },
+      });
+      if (response.generatedImages?.[0]?.image?.imageBytes) {
+        const base64Image = response.generatedImages[0].image.imageBytes;
+        setImageUrl(`data:image/jpeg;base64,${base64Image}`);
+      } else {
+        throw new Error('No image was generated.');
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Failed to generate image.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** ------------ Camera controls ------------ */
+  const handleStartCamera = () => {
+    setError(null);
+    setCapturedImage(null);
+    setImageUrl(null);
+    setSegments(null);
+    setReconstructionUrl(null);
+    setIsCameraActive(true);
+  };
+
+  const handleTakePicture = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg');
+        setCapturedImage(dataUrl);
         stopCamera();
-        setSegments(null);
-    };
+      }
+    }
+  };
 
-    const dataUrlToFile = async (dataUrl: string, fileName: string): Promise<File> => {
-        const res = await fetch(dataUrl);
-        const blob = await res.blob();
-        return new File([blob], fileName, { type: blob.type });
-    };
+  /** ------------ Redesign (Gemini → Imagen) ------------ */
+  const handleRedesignImage = async () => {
+    if (!capturedImage) {
+      setError('Please capture an image first.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setImageUrl(null);
+    setReconstructionUrl(null);
 
-    const handleSaveImage = () => {
-        if (!imageUrl) return;
-        const link = document.createElement('a');
-        link.href = imageUrl;
-        link.download = `ai-room-${selectedCategory.toLowerCase().replace(' ', '-')}.jpeg`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    };
+    const parsed = parseDataUrl(capturedImage);
+    if (!parsed) {
+      setError('Invalid image format.');
+      setLoading(false);
+      return;
+    }
 
-    const handleShareImage = async () => {
-        if (!imageUrl || !navigator.share) {
-            alert("Web Share API is not available on your browser.");
-            return;
-        }
-        try {
-            const file = await dataUrlToFile(imageUrl, `ai-room-${selectedCategory.toLowerCase()}.jpeg`);
-            if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                await navigator.share({
-                    title: 'AI Room Design',
-                    text: `Check out this ${selectedCategory} room I designed!`,
-                    files: [file],
-                });
-            } else {
-                setError("Your browser doesn't support sharing files.");
-            }
-        } catch (error) {
-            console.error('Error sharing:', error);
-            setError("Could not share the image.");
-        }
-    };
+    try {
+      /* ---- Gemini: vision input, **text‑only** output ---- */
+      const geminiResponse = await ai.models.generateContent({
+        model: 'gemini-1.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  data: parsed.data,
+                  mimeType: 'image/jpeg',
+                },
+              },
+              {
+                text: `Give me a concise description (max 30 words) of how this room would look after being redesigned in a ${selectedCategory} style.`,
+              },
+            ],
+          },
+        ],
+        // Force Gemini to return only text – otherwise it tries to give an image and fails.
+        config: { responseModalities: [Modality.TEXT] },
+      });
 
-    const handleSegmentImage = async () => {
-        if (!imageUrl) return;
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
-        setLoading(true);
-        setError(null);
-        setSegments(null);
-        try {
-            const response = await fetch(`${API_BASE_URL}/segment`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image_url: imageUrl }),
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const result = await response.json();
-            setSegments(result.segments);
-        } catch (err) {
-            console.error(err);
-            setError("Failed to segment image. Is the Python server running?");
-        } finally {
-            setLoading(false);
-        }
-    };
+      const textPart = geminiResponse.candidates?.[0]?.content?.parts?.find(
+        (p: any) => p.text,
+      );
+      if (!textPart?.text) {
+        throw new Error('Gemini did not return a redesign description.');
+      }
+      const redesignPrompt = textPart.text.trim();
+      console.log('🔎 Gemini redesign prompt:', redesignPrompt);
 
-    const handleRecolorObject = async (segment: any) => {
-        if (!imageUrl) return;
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
-        const newColor: [number, number, number] = [139, 92, 246];
-        setLoading(true);
-        setError(null);
-        try {
-            const response = await fetch(`${API_BASE_URL}/recolor`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    image_url: imageUrl,
-                    mask: segment,
-                    color: newColor,
-                }),
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const result = await response.json();
-            setImageUrl(result.image_url);
-            setSegments(null);
-        } catch (err) {
-            console.error(err);
-            setError("Failed to recolor object.");
-        } finally {
-            setLoading(false);
-        }
-    };
+      /* ---- Imagen: generate the new image from the prompt ---- */
+      const imagenResponse = await ai.models.generateImages({
+        model: 'imagen-4.0-generate-001',
+        prompt: redesignPrompt,
+        config: {
+          numberOfImages: 1,
+          outputMimeType: 'image/jpeg',
+          aspectRatio: '16:9',
+        },
+      });
 
-    const renderContent = () => {
-        if (loading) {
-            return (
-                <div className="flex flex-col items-center justify-center h-full text-white">
-                    <svg className="animate-spin -ml-1 mr-3 h-10 w-10 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <p className="mt-4 text-lg">Designing your space...</p>
-                </div>
-            );
-        }
-        if (imageUrl && segments) {
-            return (
-                <div className="relative w-full h-full">
-                    <img src={imageUrl} alt="Segmented room" className="w-full h-full object-contain" />
-                    {segments.map((segment, index) => (
-                        <div key={index} title={`Click to recolor: ${segment.label}`} className="absolute top-0 left-0 w-full h-full opacity-40 hover:opacity-60 cursor-pointer transition-opacity" style={{ WebkitMaskImage: `url(data:image/png;base64,${segment.mask})`, WebkitMaskSize: 'contain', WebkitMaskPosition: 'center', WebkitMaskRepeat: 'no-repeat', maskImage: `url(data:image/png;base64,${segment.mask})`, maskSize: 'contain', maskPosition: 'center', maskRepeat: 'no-repeat', backgroundColor: '#8B5CF6' }} onClick={() => handleRecolorObject(segment)} />
-                    ))}
-                </div>
-            );
-        }
-        if (isCameraActive) {
-            return <video ref={videoRef} className="w-full h-full object-contain" autoPlay playsInline muted />;
-        }
-        if (imageUrl) {
-            return <img src={imageUrl} alt="Generated room" className="w-full h-full object-contain" />;
-        }
-        if (capturedImage) {
-            return <img src={capturedImage} alt="Captured room for redesign" className="w-full h-full object-contain" />;
-        }
-        return (
-            <div className="flex items-center justify-center h-full text-gray-400">
-                <div className="text-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    <p className="mt-2 text-lg">Your image will appear here</p>
-                </div>
-            </div>
-        );
-    };
+      if (imagenResponse.generatedImages?.[0]?.image?.imageBytes) {
+        const base64Image = imagenResponse.generatedImages[0].image.imageBytes;
+        setImageUrl(`data:image/jpeg;base64,${base64Image}`);
+      } else {
+        throw new Error('Imagen failed to generate a redesign image.');
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Failed to redesign image.');
+    } finally {
+      setLoading(false);
+      setCapturedImage(null);
+    }
+  };
 
-    const renderActionButton = () => {
-        if (mode === 'generate') {
-            return ( <button onClick={handleGenerateImage} disabled={loading} className="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 disabled:bg-indigo-400 transition-colors duration-300 shadow-lg text-lg" > Generate Image </button> );
-        }
-        if (mode === 'redesign') {
-            if (isCameraActive) {
-                return <button onClick={handleTakePicture} className="w-full bg-red-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-700 transition-colors duration-300 shadow-lg text-lg">Take Picture</button>;
-            }
-            if (capturedImage) {
-                return <button onClick={handleRedesignImage} disabled={loading} className="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700 disabled:bg-green-400 transition-colors duration-300 shadow-lg text-lg">Redesign Image</button>;
-            }
-            return <button onClick={handleStartCamera} className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors duration-300 shadow-lg text-lg">Scan My Room</button>;
-        }
-    };
+  /** ------------ Mode switch ------------ */
+  const switchMode = (m: 'generate' | 'redesign') => {
+    setMode(m);
+    setError(null);
+    setImageUrl(null);
+    setCapturedImage(null);
+    setSegments(null);
+    setReconstructionUrl(null);
+    stopCamera();
+  };
+
+  /** ------------ Utility for sharing / saving ------------ */
+  const dataUrlToFile = async (
+    dataUrl: string,
+    fileName: string,
+  ): Promise<File> => {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    return new File([blob], fileName, { type: blob.type });
+  };
+
+  const handleSaveImage = () => {
+    if (!imageUrl) return;
+    const link = document.createElement('a');
+    link.href = imageUrl;
+    link.download = `ai-room-${selectedCategory.toLowerCase()}.jpeg`;
+    link.click();
+  };
+
+  const handleShareImage = async () => {
+    if (!imageUrl || !navigator.share) {
+      alert('Web Share not supported.');
+      return;
+    }
+    try {
+      const file = await dataUrlToFile(
+        imageUrl,
+        `ai-room-${selectedCategory}.jpeg`,
+      );
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: 'AI Room Design',
+          text: `Check out this ${selectedCategory} room!`,
+          files: [file],
+        });
+      }
+    } catch (err) {
+      console.error('Share error:', err);
+    }
+  };
+
+  /** ------------ Segmentation (Fal) ------------ */
+  const handleSegmentImage = async () => {
+    if (!imageUrl) return;
+    setLoading(true);
+    setError(null);
+    setSegments(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/segment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_url: imageUrl }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = await res.json();
+      setSegments(result.segments);
+    } catch (err) {
+      console.error(err);
+      setError('Segmentation failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** ------------ Recolour (Fal) ------------ */
+  const handleRecolorObject = async (segment: any) => {
+    if (!imageUrl) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/recolor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_url: imageUrl,
+          mask: segment,
+          color: [139, 92, 246],
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = await res.json();
+      setImageUrl(result.image_url);
+      setSegments(null);
+    } catch (err) {
+      console.error(err);
+      setError('Recolor failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** ------------ 3‑D Reconstruction (Fal) ------------ */
+  const handleReconstructImage = async () => {
+    if (!imageUrl) {
+      setError('Please generate or capture an image first.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setReconstructionUrl(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/reconstruct`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_url: imageUrl }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = await res.json();
+      setReconstructionUrl(result.reconstruction_url);
+    } catch (err) {
+      console.error('Reconstruct error:', err);
+      setError('3D reconstruction failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // -------------------------- RENDER --------------------------
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-white">
+          <svg className="animate-spin h-10 w-10" viewBox="0 0 24 24" />
+          <p className="mt-4 text-lg">Processing…</p>
+        </div>
+      );
+    }
+
+    if (reconstructionUrl) {
+      return (
+        <model-viewer
+          src={reconstructionUrl}
+          alt="3D Room Reconstruction"
+          camera-controls
+          auto-rotate
+          style={{ width: '100%', height: '100%' }}
+          onError={e => {
+            console.error('model-viewer load error:', e);
+            setError('Unable to load the 3‑D model. Please try again later.');
+            setReconstructionUrl(null);
+          }}
+        />
+      );
+    }
+
+    if (imageUrl && segments) {
+      return (
+        <div className="relative w-full h-full">
+          <img src={imageUrl} className="w-full h-full object-contain" />
+          {segments.map((s, i) => (
+            <div
+              key={i}
+              onClick={() => handleRecolorObject(s)}
+              style={{
+                WebkitMaskImage: `url(data:image/png;base64,${s.mask})`,
+                maskImage: `url(data:image/png;base64,${s.mask})`,
+                backgroundColor: '#8B5CF6',
+              }}
+              className="absolute inset-0 opacity-40 hover:opacity-60 cursor-pointer"
+            />
+          ))}
+        </div>
+      );
+    }
+
+    if (isCameraActive)
+      return (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full h-full object-contain"
+        />
+      );
+    if (imageUrl) return <img src={imageUrl} className="w-full h-full object-contain" />;
+    if (capturedImage) return <img src={capturedImage} className="w-full h-full object-contain" />;
 
     return (
-        <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center p-4 sm:p-6 lg:p-8 font-sans">
-            <header className="w-full max-w-5xl text-center mb-6">
-                <h1 className="text-4xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-600">
-                    AI Room Designer
-                </h1>
-                <p className="text-gray-400 mt-2 text-lg">
-                    Create or reimagine your perfect space with AI.
-                </p>
-            </header>
-    
-            <main className="w-full max-w-5xl flex-1 flex flex-col bg-gray-800 rounded-2xl shadow-2xl overflow-hidden">
-                <div className="p-6 border-b border-gray-700">
-                    <div className="flex bg-gray-900 rounded-lg p-1 space-x-1 mb-6">
-                        <button
-                            onClick={() => switchMode('generate')}
-                            className={`w-1/2 py-2.5 text-sm font-medium leading-5 rounded-lg transition-colors duration-300 ${
-                                mode === 'generate'
-                                    ? 'bg-indigo-600 text-white shadow'
-                                    : 'text-gray-300 hover:bg-gray-700'
-                            }`}
-                        >
-                            Generate New
-                        </button>
-                        <button
-                            onClick={() => switchMode('redesign')}
-                            className={`w-1/2 py-2.5 text-sm font-medium leading-5 rounded-lg transition-colors duration-300 ${
-                                mode === 'redesign'
-                                    ? 'bg-indigo-600 text-white shadow'
-                                    : 'text-gray-300 hover:bg-gray-700'
-                            }`}
-                        >
-                            Redesign My Room
-                        </button>
-                    </div>
-    
-                    <h2 className="text-xl font-semibold mb-3 text-gray-200">
-                        Choose a Style
-                    </h2>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                        {categories.map(category => (
-                            <button
-                                key={category}
-                                onClick={() => setSelectedCategory(category)}
-                                className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${
-                                    selectedCategory === category
-                                        ? 'bg-indigo-500 text-white ring-2 ring-indigo-400 shadow-md'
-                                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                                }`}
-                            >
-                                {category}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-    
-                <div className="flex-1 bg-gray-900 p-2 min-h-[300px] sm:min-h-[400px] lg:min-h-[500px]">
-                    <div className="bg-black w-full h-full rounded-lg flex items-center justify-center relative">
-                        {renderContent()}
-                        <canvas ref={canvasRef} className="hidden"></canvas>
-                    </div>
-                </div>
-    
-                {error && (
-                    <div className="p-4 bg-red-900 text-red-200 text-center">
-                        {error}
-                    </div>
-                )}
-    
-                <footer className="p-6 border-t border-gray-700">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
-                        <div className="sm:col-span-1"></div>
-                        <div className="sm:col-span-1">{renderActionButton()}</div>
-                        <div className="sm:col-span-1 flex justify-center sm:justify-end space-x-3">
-                            {imageUrl && (
-                                <>
-                                    <button
-                                        onClick={handleSaveImage}
-                                        className="flex items-center space-x-2 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
-                                    >
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            className="h-5 w-5"
-                                            viewBox="0 0 20 20"
-                                            fill="currentColor"
-                                        >
-                                            <path
-                                                fillRule="evenodd"
-                                                d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"
-                                                clipRule="evenodd"
-                                            />
-                                        </svg>
-                                        <span>Save</span>
-                                    </button>
-    
-                                    <button
-                                        onClick={handleSegmentImage}
-                                        className="flex items-center space-x-2 bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
-                                    >
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            className="h-5 w-5"
-                                            viewBox="0 0 20 20"
-                                            fill="currentColor"
-                                        >
-                                            <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
-                                            <path
-                                                fillRule="evenodd"
-                                                d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"
-                                                clipRule="evenodd"
-                                            />
-                                        </svg>
-                                        <span>Magic Edit</span>
-                                    </button>
-    
-                                    {navigator.share && (
-                                        <button
-                                            onClick={handleShareImage}
-                                            className="flex items-center space-x-2 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300"
-                                        >
-                                            <svg
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                className="h-5 w-5"
-                                                viewBox="0 0 20 20"
-                                                fill="currentColor"
-                                            >
-                                                <path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.895-1.789l-4.94-2.47a3.027 3.027 0 000-.74l4.94-2.47C13.456 7.68 14.19 8 15 8z" />
-                                            </svg>
-                                            <span>Share</span>
-                                        </button>
-                                    )}
-                                </>
-                            )}
-                        </div>
-                    </div>
-                </footer>
-            </main>
-        </div>
+      <div className="flex items-center justify-center h-full text-gray-400">
+        Your image will appear here
+      </div>
     );
+  };
+
+  const renderActionButton = () => {
+    if (mode === 'generate') {
+      return (
+        <button
+          onClick={handleGenerateImage}
+          disabled={loading}
+          className="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg"
+        >
+          Generate Image
+        </button>
+      );
+    }
+
+    if (mode === 'redesign') {
+      if (isCameraActive) {
+        return (
+          <button
+            onClick={handleTakePicture}
+            className="w-full bg-red-600 text-white font-bold py-3 px-4 rounded-lg"
+          >
+            Take Picture
+          </button>
+        );
+      }
+      if (capturedImage) {
+        return (
+          <button
+            onClick={handleRedesignImage}
+            disabled={loading}
+            className="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg"
+          >
+            Redesign Image
+          </button>
+        );
+      }
+      return (
+        <button
+          onClick={handleStartCamera}
+          className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg"
+        >
+          Scan My Room
+        </button>
+      );
+    }
+
+    return null;
+  };
+
+  // -------------------------- RETURN --------------------------
+  return (
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center p-4">
+      {/* Header */}
+      <header className="w-full max-w-5xl text-center mb-6">
+        <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-600">
+          AI Room Designer
+        </h1>
+        <p className="text-gray-400 mt-2">
+          Create or reimagine your perfect space with AI.
+        </p>
+      </header>
+
+      {/* Main content */}
+      <main className="w-full max-w-5xl flex-1 flex flex-col bg-gray-800 rounded-2xl shadow-2xl overflow-hidden">
+        {/* Controls */}
+        <div className="p-6 border-b border-gray-700">
+          <div className="flex bg-gray-900 rounded-lg p-1 space-x-1 mb-6">
+            <button
+              onClick={() => switchMode('generate')}
+              className={`w-1/2 py-2.5 rounded-lg ${
+                mode === 'generate' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              Generate New
+            </button>
+            <button
+              onClick={() => switchMode('redesign')}
+              className={`w-1/2 py-2.5 rounded-lg ${
+                mode === 'redesign' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              Redesign My Room
+            </button>
+          </div>
+
+          <h2 className="text-xl mb-3 text-gray-200">Choose a Style</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {categories.map(c => (
+              <button
+                key={c}
+                onClick={() => setSelectedCategory(c)}
+                className={`px-4 py-2 rounded-lg ${
+                  selectedCategory === c ? 'bg-indigo-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Preview / canvas */}
+        <div className="flex-1 bg-gray-900 p-2 min-h-[300px]">
+          <div className="bg-black w-full h-full rounded-lg flex items-center justify-center relative">
+            {renderContent()}
+            <canvas ref={canvasRef} className="hidden" />
+          </div>
+        </div>
+
+        {/* Error banner */}
+        {error && (
+          <div className="p-4 bg-red-900 text-red-200 text-center">{error}</div>
+        )}
+
+        {/* Footer actions */}
+        <footer className="p-6 border-t border-gray-700">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+            <div />
+            <div>{renderActionButton()}</div>
+            <div className="flex justify-center sm:justify-end space-x-3">
+              {imageUrl && (
+                <>
+                  <button
+                    onClick={handleSaveImage}
+                    className="bg-gray-700 hover:bg-gray-600 py-2 px-4 rounded-lg"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={handleSegmentImage}
+                    className="bg-pink-600 hover:pink-700 py-2 px-4 rounded-lg"
+                  >
+                    Magic Edit
+                  </button>
+                  <button
+                    onClick={handleReconstructImage}
+                    className="bg-yellow-600 hover:bg-yellow-700 py-2 px-4 rounded-lg"
+                  >
+                    Reconstruct in 3D
+                  </button>
+                  {navigator.share && (
+                    <button
+                      onClick={handleShareImage}
+                      className="bg-gray-700 hover:bg-gray-600 py-2 px-4 rounded-lg"
+                    >
+                      Share
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </footer>
+      </main>
+    </div>
+  );
 };
-    
+
 export default App;

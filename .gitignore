@@ -118,3 +118,13 @@ backend/venv/
 # Python Caches
 __pycache__/
 *.pyc
+
+# SSL certificates (add these lines)
+*.pem
+*.key
+*.crt
+*.cert
+
+# Or be more specific if you prefer
+localhost-key.pem
+localhost.pem
