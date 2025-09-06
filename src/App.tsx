@@ -5,7 +5,7 @@ import { GoogleGenAI, Modality } from "@google/genai";
 // process.env does not work in a build-less setup like this.
 // Replace the placeholder below with your actual API key.
 // WARNING: Do not commit your API key to a public repository.
-const API_KEY = "YOUR_GOOGLE_AI_API_KEY";
+const API_KEY = import.meta.env.VITE_GOOGLE_AI_API_KEY;
 
 const App: React.FC = () => {
     const [loading, setLoading] = useState<boolean>(false);
