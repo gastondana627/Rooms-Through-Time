@@ -10,8 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@fal-ai/client": "^1.6.2",
-    "@fal-ai/serverless-client": "^0.5.3",
     "@google/genai": "^1.17.0",
     "@google/model-viewer": "^4.1.0",
     "react": "^18.2.0",
