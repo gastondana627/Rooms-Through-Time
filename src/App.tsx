@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality } from '@google/genai';
 import * as fal from '@fal-ai/serverless-client';
+import { segment, recolor, reconstruct } from './api';
 
 /* --------------------------------------------------------------
    Do **NOT** import '@google/model-viewer' – the component is loaded
@@ -41,27 +42,6 @@ const App: React.FC = () => {
     'Farmhouse',
   ];
 
-  // -------------------------- API BASE URL --------------------------
-  const isDevelopment = import.meta.env.DEV;
-  const isLocalhost =
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1';
-
-  /**
-   * Production:
-   *   - Railway injects the env‑var `VITE_API_BASE_URL` (e.g.
-   *     https://rooms-through-time-production.up.railway.app)
-   *   - If that variable is missing we fall back to the current origin
-   *     (`window.location.host`). This means the UI and API share the same
-   *     origin and CORS stays happy.
-   * Development:
-   *   - When running locally we hit the FastAPI dev server on 127.0.0.1:8000.
-   */
-  const API_BASE_URL = isDevelopment && isLocalhost
-    ? 'http://127.0.0.1:8000'
-    : (import.meta.env.VITE_API_BASE_URL ||
-       `${window.location.protocol}//${window.location.host}`);
-
   // -------------------------- CAMERA HOOK --------------------------
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -89,7 +69,7 @@ const App: React.FC = () => {
           });
         } catch (err: any) {
           console.error('Camera access error:', err.name, err.message);
- if (
+          if (
             err.name === 'NotAllowedError' ||
             err.name === 'PermissionDeniedError'
           ) {
@@ -306,20 +286,14 @@ const App: React.FC = () => {
     }
   };
 
-  /** ------------ Segmentation (Fal) ------------ */
+  /** ------------ Segmentation (using api.ts) ------------ */
   const handleSegmentImage = async () => {
     if (!imageUrl) return;
     setLoading(true);
     setError(null);
     setSegments(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/segment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_url: imageUrl }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const result = await res.json();
+      const result = await segment(imageUrl);
       setSegments(result.segments);
     } catch (err) {
       console.error(err);
@@ -329,23 +303,13 @@ const App: React.FC = () => {
     }
   };
 
-  /** ------------ Recolour (Fal) ------------ */
+  /** ------------ Recolour (using api.ts) ------------ */
   const handleRecolorObject = async (segment: any) => {
     if (!imageUrl) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/recolor`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_url: imageUrl,
-          mask: segment,
-          color: [139, 92, 246],
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const result = await res.json();
+      const result = await recolor(imageUrl, segment, [139, 92, 246]);
       setImageUrl(result.image_url);
       setSegments(null);
     } catch (err) {
@@ -356,7 +320,7 @@ const App: React.FC = () => {
     }
   };
 
-  /** ------------ 3‑D Reconstruction (Enhanced) ------------ */
+  /** ------------ 3‑D Reconstruction (using api.ts) ------------ */
   const handleReconstructImage = async () => {
     if (!imageUrl) {
       setError('Please generate or capture an image first.');
@@ -367,13 +331,7 @@ const App: React.FC = () => {
     setReconstructionUrl(null);
     setModelInfo(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/reconstruct`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_url: imageUrl }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const result = await res.json();
+      const result = await reconstruct(imageUrl);
       setReconstructionUrl(result.reconstruction_url);
       setModelInfo(result.model_info);
     } catch (err) {
