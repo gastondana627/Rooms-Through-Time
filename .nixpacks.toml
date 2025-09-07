@@ -3,23 +3,24 @@
 [phases.setup]
 # Node 20 gives us the right engine for @google/genai.
 # Python 3.11 is sufficient for FastAPI.
-nixPkgs = ["python311", "nodejs-20_x"]   # <-- use Node 20, not Node 18
+nixPkgs = ["python311", "nodejs_20_x"]   # <-- note: nodejs_20_x (underscore, not hyphen)
 
 [phases.install]
 # 1️⃣ Install the Python dependencies the FastAPI server needs.
 # 2️⃣ Install the npm dependencies for the Vite/React UI (uses the lock‑file we already have).
 cmds = [
   "pip install -r backend/requirements.txt",
-  "npm ci"                     # runs in the repo root, reads package‑lock.json
+  "npm ci"                     # runs in the repository root, reads package‑lock.json
 ]
 
 [phases.build]
 # Build the React bundle with Vite. Vite outputs the compiled files into ./dist by default.
 cmds = [
-  "npm run build"              # also runs in the repo root
+  "npm run build"              # also runs in the repository root
 ]
 
 [start]
 # Railway injects $PORT at runtime; start the FastAPI server.
-# `python -m uvicorn` works even when the uvicorn binary isn’t on $PATH.
-cmd = "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port $PORT"
+# Use `python3 -m uvicorn` – the interpreter is called `python3` inside the Nix image.
+cmd = "cd backend && python3 -m uvicorn main:app --host 0.0.0.0 --port $PORT"
+
