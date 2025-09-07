@@ -1,0 +1,24 @@
+# .nixpacks.toml – tells Railway how to build the whole repo
+
+[phases.setup]
+# Node 20 gives us the right engine for @google/genai.
+# Python 3.11 is sufficient for FastAPI.
+nixPkgs = ["python311", "nodejs-20_x"]
+
+[phases.install]
+# 1️⃣ Install the Python dependencies the FastAPI server needs.
+# 2️⃣ Install the npm dependencies for the Vite/React UI (uses the lock‑file we already have).
+cmds = [
+  "pip install -r backend/requirements.txt",
+  "npm ci"                     # <-- runs in the repository root, reads package-lock.json
+]
+
+[phases.build]
+# Build the React bundle with Vite. Vite outputs the compiled files into ./dist by default.
+cmds = [
+  "npm run build"              # <-- also runs in the repository root
+]
+
+[start]
+# Railway injects $PORT at runtime; start the FastAPI server.
+cmd = "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT"

@@ -25,8 +25,9 @@ app.add_middleware(
         "https://localhost:5173",
         "http://127.0.0.1:5173",
         "https://127.0.0.1:5173",
-        "https://rooms-through-time.vercel.app",  # Your Vercel frontend
-        "https://rooms-through-time.vercel.app/", # With trailing slash
+        "https://rooms-through-time.vercel.app",          # Vercel front‑end
+        "https://rooms-through-time.vercel.app/",        # trailing slash
+        "https://rooms-through-time-production.up.railway.app",  # <-- NEW
     ],
     allow_credentials=True,
     allow_methods=["*"],

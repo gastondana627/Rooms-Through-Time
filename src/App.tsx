@@ -8,8 +8,6 @@ import * as fal from '@fal-ai/serverless-client';
    from the <script> tag in index.html.  The TypeScript declaration
    lives in src/model-viewer.d.ts, so the JSX tag is recognised.
 -------------------------------------------------------------- */
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
-
 
 const API_KEY = import.meta.env.VITE_GOOGLE_AI_API_KEY;
 
@@ -48,9 +46,21 @@ const App: React.FC = () => {
   const isLocalhost =
     window.location.hostname === 'localhost' ||
     window.location.hostname === '127.0.0.1';
+
+  /**
+   * Production:
+   *   - Railway injects the env‑var `VITE_API_BASE_URL` (e.g.
+   *     https://rooms-through-time-production.up.railway.app)
+   *   - If that variable is missing we fall back to the current origin
+   *     (`window.location.host`). This means the UI and API share the same
+   *     origin and CORS stays happy.
+   * Development:
+   *   - When running locally we hit the FastAPI dev server on 127.0.0.1:8000.
+   */
   const API_BASE_URL = isDevelopment && isLocalhost
     ? 'http://127.0.0.1:8000'
-    : (import.meta.env.VITE_API_BASE_URL || 'https://your-production-api.com');
+    : (import.meta.env.VITE_API_BASE_URL ||
+       `${window.location.protocol}//${window.location.host}`);
 
   // -------------------------- CAMERA HOOK --------------------------
   useEffect(() => {
@@ -79,7 +89,7 @@ const App: React.FC = () => {
           });
         } catch (err: any) {
           console.error('Camera access error:', err.name, err.message);
-          if (
+ if (
             err.name === 'NotAllowedError' ||
             err.name === 'PermissionDeniedError'
           ) {
@@ -212,7 +222,6 @@ const App: React.FC = () => {
             ],
           },
         ],
-        // Force Gemini to return only text – otherwise it tries to give an image and fails.
         config: { responseModalities: [Modality.TEXT] },
       });
 
@@ -244,7 +253,7 @@ const App: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      setError('Failed to redesign image.');
+      setError('Failed to image.');
     } finally {
       setLoading(false);
       setCapturedImage(null);
@@ -264,10 +273,7 @@ const App: React.FC = () => {
   };
 
   /** ------------ Utility for sharing / saving ------------ */
-  const dataUrlToFile = async (
-    dataUrl: string,
-    fileName: string,
-  ): Promise<File> => {
+  const dataUrlToFile = async (dataUrl: string, fileName: string): Promise<File> => {
     const res = await fetch(dataUrl);
     const blob = await res.blob();
     return new File([blob], fileName, { type: blob.type });
@@ -287,10 +293,7 @@ const App: React.FC = () => {
       return;
     }
     try {
-      const file = await dataUrlToFile(
-        imageUrl,
-        `ai-room-${selectedCategory}.jpeg`,
-      );
+      const file = await dataUrlToFile(imageUrl, `ai-room-${selectedCategory}.jpeg`);
       if (navigator.canShare?.({ files: [file] })) {
         await navigator.share({
           title: 'AI Room Design',
@@ -602,7 +605,7 @@ const App: React.FC = () => {
                   </button>
                   <button
                     onClick={handleSegmentImage}
-                    className="bg-pink-600 hover:bg-pink-700 py-2 px-4 rounded-lg"
+                    className="bg-pink-600 hover:pink-700 py-2 px-4 rounded-lg"
                   >
                     Magic Edit
                   </button>
@@ -624,7 +627,7 @@ const App: React.FC = () => {
               )}
             </div>
           </div>
-          
+
           {/* Enhanced 3D Model Controls */}
           {reconstructionUrl && modelInfo && (
             <div className="mt-6 p-4 bg-gray-800 rounded-lg border border-gray-600">
@@ -637,7 +640,7 @@ const App: React.FC = () => {
                   {showModelDetails ? 'Hide Details' : 'Show Details'}
                 </button>
               </div>
-              
+
               <div className="flex flex-wrap gap-3 mb-3">
                 <button
                   onClick={handleDownloadGLB}
@@ -658,16 +661,16 @@ const App: React.FC = () => {
                   Copy URL
                 </button>
               </div>
-              
+
               {showModelDetails && modelInfo && (
                 <div className="text-sm text-gray-300 space-y-1">
                   <p><strong>Model:</strong> {modelInfo.model_used}</p>
                   <p><strong>File Size:</strong> {modelInfo.file_size ? `${Math.round(modelInfo.file_size / 1024)} KB` : 'Unknown'}</p>
                   <p><strong>Format:</strong> {modelInfo.content_type || 'GLB'}</p>
-                  <p><strong>Direct URL:</strong> 
-                    <a 
-                      href={modelInfo.direct_download} 
-                      target="_blank" 
+                  <p><strong>Direct URL:</strong>{' '}
+                    <a
+                      href={modelInfo.direct_download}
+                      target="_blank"
                       rel="noopener noreferrer"
                       className="text-indigo-400 hover:text-indigo-300 ml-1 break-all"
                     >
