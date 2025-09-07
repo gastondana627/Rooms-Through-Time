@@ -2,9 +2,11 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "cd backend && python3 -m uvicorn main:app --host 0.0.0.0 --port $PORT"
+# No “cd backend”.  main.py lives at the repo root.
+startCommand = "python3 -m uvicorn main:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/health"
-healthcheckTimeout = 300
+healthcheckTimeout = 60
 
 [variables]
+# You can keep PORT here – Railway injects it automatically, but it doesn’t hurt.
 PORT = "8000"

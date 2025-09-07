@@ -3,6 +3,7 @@
 # --------------------------------------------------------------
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles          # <-- NEW import
 from pydantic import BaseModel
 import fal_client
 import base64
@@ -17,8 +18,9 @@ from dotenv import load_dotenv
 load_dotenv()                     # .env → os.environ
 app = FastAPI(title="AI Room Designer API")
 
-# Allow the Vite dev server (both http & https) to call the API
-# Updated CORS configuration for main.py
+# --------------------------------------------------------------
+# 2️⃣  CORS – keep it (harmless now that UI & API share origin)
+# --------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -26,11 +28,9 @@ app.add_middleware(
         "https://localhost:5173",
         "http://127.0.0.1:5173",
         "https://127.0.0.1:5173",
-        "http://127.0.0.1:8000",                                     # Local backend
-        "https://rooms-through-time.vercel.app",                    # Vercel frontend
-        "https://rooms-through-time.vercel.app/",                   # Vercel with slash
-        "https://rooms-through-time-production.up.railway.app",     # Railway monorepo (same domain for frontend + backend)
-        "https://rooms-through-time-production.up.railway.app/",    # Railway with slash
+        "http://127.0.0.1:8000",                     # local backend
+        "https://rooms-through-time.vercel.app",      # Vercel‑hosted UI (if you ever use it)
+        "https://rooms-through-time-production.up.railway.app",  # Railway UI + API
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -38,7 +38,7 @@ app.add_middleware(
 )
 
 # --------------------------------------------------------------
-# 2️⃣ Fal.AI configuration
+# 3️⃣  Fal.AI configuration
 # --------------------------------------------------------------
 FAL_KEY = os.getenv("FAL_KEY")
 if not FAL_KEY:
@@ -46,27 +46,19 @@ if not FAL_KEY:
 print("✅ FAL API key configured successfully")
 fal_client.api_key = FAL_KEY
 
-# -----------------------------------------------------------------
-# 2.1  3‑D reconstruction model slug - UPDATED WITH WORKING MODELS
-# -----------------------------------------------------------------
-# Updated to use actual working models instead of non-existent "3d-reconstruction"
+# --------------------------------------------------------------
+# 4️⃣  3‑D model slugs & demo GLB fallback
+# --------------------------------------------------------------
 FAL_3D_MODELS = [
-    "fal-ai/trellis",      # Primary model - most versatile
-    "fal-ai/triposr",      # Fallback 1 - good for objects
-    "fal-ai/hyper3d",      # Fallback 2 - high quality
+    "fal-ai/trellis",
+    "fal-ai/triposr",
+    "fal-ai/hyper3d",
 ]
 
-# -----------------------------------------------------------------
-# 2.2  Demo GLB – a publicly hosted .glb used as fallback
-# -----------------------------------------------------------------
-# This URL is guaranteed to exist (it ships with the model‑viewer repo).
-# Feel free to replace it with any GLB you host yourself.
-DEMO_GL_B_URL = (
-    "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
-)
+DEMO_GL_B_URL = "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
 
 # --------------------------------------------------------------
-# 3️⃣ Request models (Pydantic)
+# 5️⃣  Pydantic request models
 # --------------------------------------------------------------
 class SegmentRequest(BaseModel):
     image_url: str               # data:image/...;base64,XXXXX
@@ -83,26 +75,19 @@ class ReconstructRequest(BaseModel):
 
 
 # --------------------------------------------------------------
-# 4️⃣ Helper utilities – base64 ↔ Pillow.Image
+# 6️⃣  Helper utilities – base64 ↔ Pillow.Image
 # --------------------------------------------------------------
 def base64_to_image(b64: str) -> Image.Image:
-    """
-    Convert a data‑url (e.g. ``data:image/png;base64,AAAA``) or a raw
-    base64 string into a Pillow ``Image``.
-    """
+    """Convert a data‑url or raw base64 string into a Pillow Image."""
     if b64.startswith("data:image"):
         b64 = b64.split(",", 1)[1]        # strip the mime‑type prefix
     img_bytes = base64.b64decode(b64.strip())
     img = Image.open(io.BytesIO(img_bytes))
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    return img
+    return img.convert("RGB") if img.mode != "RGB" else img
 
 
 def image_to_base64(image: Image.Image, fmt: str = "JPEG") -> str:
-    """
-    Encode a Pillow ``Image`` as a base64 string (no ``data:`` prefix).
-    """
+    """Encode a Pillow Image to a base64 string (no data‑url prefix)."""
     buf = io.BytesIO()
     if fmt.upper() == "JPEG" and image.mode != "RGB":
         image = image.convert("RGB")
@@ -111,27 +96,38 @@ def image_to_base64(image: Image.Image, fmt: str = "JPEG") -> str:
 
 
 # --------------------------------------------------------------
-# 5️⃣ Routes
+# 7️⃣  **Serve the Vite build** (monorepo mode)
+# --------------------------------------------------------------
+# After `npm run build` the static files are placed in ./dist.
+# When the container starts its working directory is /app,
+# so "./dist" is the correct relative path.
+if os.path.isdir("dist"):
+    # `html=True` makes FastAPI fallback to index.html for any unknown route,
+    # which lets React handle client‑side routing.
+    app.mount(
+        "/",                     # everything under the root URL
+        StaticFiles(directory="dist", html=True),
+        name="frontend",
+    )
+    print("✅ Static front‑end mounted from ./dist")
+
+# --------------------------------------------------------------
+# 8️⃣  Root endpoint (simple health)
 # --------------------------------------------------------------
 @app.get("/")
 async def root():
     return {"message": "AI Room Designer API is running"}
 
-
-# -----------------------------------------------------------------
-# 5.1  Segmentation (unchanged)
-# -----------------------------------------------------------------
+# --------------------------------------------------------------
+# 9️⃣  Image Segmentation
+# --------------------------------------------------------------
 @app.post("/segment")
 async def segment_image(request: SegmentRequest):
-    """
-    Returns a list of masks, each mask is a base64‑png string.
-    """
     try:
         print("🔍 Starting image segmentation…")
         pil_img = base64_to_image(request.image_url)
         img_b64 = image_to_base64(pil_img)          # JPEG for Fal
 
-        # centre‑point prompt – works for any resolution
         w, h = pil_img.size
         centre = [w // 2, h // 2]
 
@@ -152,7 +148,11 @@ async def segment_image(request: SegmentRequest):
         segments = []
         for i, mask_info in enumerate(result.get("masks", [])):
             mask_url = mask_info["mask"]
-            mask_b64 = mask_url.split(",", 1)[1] if mask_url.startswith("data:") else mask_url
+            mask_b64 = (
+                mask_url.split(",", 1)[1]
+                if mask_url.startswith("data:")
+                else mask_url
+            )
             segments.append(
                 {
                     "label": f"Object {i + 1}",
@@ -165,18 +165,16 @@ async def segment_image(request: SegmentRequest):
         import traceback
         print("❌ Segmentation error:", exc)
         print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Segmentation failed: {exc}")
+        raise HTTPException(
+            status_code=500, detail=f"Segmentation failed: {exc}"
+        )
 
 
-# -----------------------------------------------------------------
-# 5.2  Recolour (unchanged)
-# -----------------------------------------------------------------
+# --------------------------------------------------------------
+# 10️⃣  Recolor
+# --------------------------------------------------------------
 @app.post("/recolor")
 async def recolor_object(request: RecolorRequest):
-    """
-    Paint the masked region with the supplied RGB colour and
-    return a JPEG data‑url.
-    """
     try:
         img = base64_to_image(request.image_url)
 
@@ -197,34 +195,29 @@ async def recolor_object(request: RecolorRequest):
         import traceback
         print("❌ Recolor error:", exc)
         print(traceback.format_exc())
-        # Return the original image so the UI never crashes
+        # Return original image so UI never crashes
         return {"image_url": request.image_url}
 
 
-# -----------------------------------------------------------------
-# 5.3  3‑D reconstruction (FIXED TO EXTRACT model_mesh.url)
-# -----------------------------------------------------------------
+# --------------------------------------------------------------
+# 11️⃣  3‑D Reconstruction
+# --------------------------------------------------------------
 @app.post("/reconstruct")
 async def reconstruct_3d(request: ReconstructRequest):
-    """
-    Calls Fal AI's 3‑D reconstruction models in fallback order and returns a single field
-    ``reconstruction_url`` that points to a .glb file.
-    If no models work, a demo GLB is returned as a graceful fallback.
-    """
     try:
         print("🪐 Starting 3‑D reconstruction…")
         pil_img = base64_to_image(request.image_url)
 
-        # Fal expects a JPEG data‑url
         img_b64 = image_to_base64(pil_img, fmt="JPEG")
         image_data_url = f"data:image/jpeg;base64,{img_b64}"
 
-        # Try each model in order until one works
         for i, model_name in enumerate(FAL_3D_MODELS):
             try:
-                print(f"🧪 Trying model {i+1}/{len(FAL_3D_MODELS)}: {model_name}")
-                
-                # Different models have different parameter requirements
+                print(
+                    f"🧪 Trying model {i + 1}/{len(FAL_3D_MODELS)}: {model_name}"
+                )
+
+                # Payload varies per model
                 if model_name == "fal-ai/trellis":
                     payload = {
                         "image_url": image_data_url,
@@ -240,123 +233,113 @@ async def reconstruct_3d(request: ReconstructRequest):
                 elif model_name == "fal-ai/hyper3d":
                     payload = {
                         "image_url": image_data_url,
-                        "quality": "high",  # Options: "low", "medium", "high"
+                        "quality": "high",
                     }
                 else:
-                    # Generic payload for any other models
                     payload = {"image_url": image_data_url}
 
                 result = fal_client.run(model_name, arguments=payload)
-                print(f"✅ {model_name} response keys:", list(result.keys()))
-                
-                # Debug: Print the actual structure of model_mesh if it exists
-                if "model_mesh" in result:
-                    model_mesh = result["model_mesh"]
-                    print(f"🔍 model_mesh type: {type(model_mesh)}")
-                    if isinstance(model_mesh, dict):
-                        print(f"🔍 model_mesh keys: {list(model_mesh.keys())}")
-                    elif isinstance(model_mesh, str):
-                        print(f"🔍 model_mesh is string: {model_mesh[:100]}...")
-                    else:
-                        print(f"🔍 model_mesh content: {str(model_mesh)[:200]}...")
+                print(f"✅ {model_name} keys:", list(result.keys()))
 
-                # FIXED: Extract URL from different possible locations
+                # -----------------------------------------------------------------
+                # Extract the GLB URL – Fal can return it under many different keys
+                # -----------------------------------------------------------------
                 model_mesh = result.get("model_mesh", {})
                 mesh_url = (
-                    result.get("model_url") or 
-                    result.get("mesh_url") or 
-                    result.get("glb_url") or
-                    result.get("output_url") or
-                    # THE KEY FIX: Extract from model_mesh.url
-                    (model_mesh.get("url") if isinstance(model_mesh, dict) else None) or
-                    (model_mesh if isinstance(model_mesh, str) else None)
+                    result.get("model_url")
+                    or result.get("mesh_url")
+                    or result.get("glb_url")
+                    or result.get("output_url")
+                    or (model_mesh.get("url") if isinstance(model_mesh, dict) else None)
+                    or (model_mesh if isinstance(model_mesh, str) else None)
                 )
-                
                 print(f"🔍 Extracted mesh_url: {mesh_url}")
 
                 if mesh_url:
-                    print(f"🎉 3‑D reconstruction successful with {model_name}!")
                     return {
                         "reconstruction_url": mesh_url,
                         "model_info": {
                             "model_used": model_name,
-                            "file_size": model_mesh.get("file_size"),
-                            "content_type": model_mesh.get("content_type"),
-                            "direct_download": mesh_url  # For user access
-                        }
+                            "file_size": (
+                                model_mesh.get("file_size")
+                                if isinstance(model_mesh, dict)
+                                else None
+                            ),
+                            "content_type": (
+                                model_mesh.get("content_type")
+                                if isinstance(model_mesh, dict)
+                                else None
+                            ),
+                            "direct_download": mesh_url,
+                        },
                     }
                 else:
-                    print(f"⚠️ {model_name} returned no mesh URL, trying next model...")
-                    continue
-
-            except fal_client.client.FalClientError as model_error:
-                error_msg = str(model_error).lower()
-                if "not found" in error_msg:
-                    print(f"❌ {model_name} not found, trying next model...")
-                elif "quota" in error_msg or "limit" in error_msg:
-                    print(f"⚠️ {model_name} quota/limit reached, trying next model...")
+                    print(
+                        f"⚠️ {model_name} returned no mesh URL – trying next..."
+                    )
+            except fal_client.client.FalClientError as e:
+                msg = str(e).lower()
+                if "not found" in msg:
+                    print(f"❌ {model_name} not found – trying next")
+                elif "quota" in msg or "limit" in msg:
+                    print(f"⚠️ {model_name} quota exceeded – trying next")
                 else:
-                    print(f"❌ {model_name} error: {model_error}")
-                continue
-            except Exception as model_error:
-                print(f"❌ {model_name} unexpected error: {model_error}")
-                continue
+                    print(f"❌ {model_name} error: {e}")
+            except Exception as e:
+                print(f"❌ Unexpected error for {model_name}: {e}")
 
-        # If we get here, all models failed
-        print("⚠️ All 3D models failed, falling back to demo GLB")
+        # If every model fails, fall back to the public demo GLB
+        print("⚠️ All models failed – returning demo GLB")
         return {"reconstruction_url": DEMO_GL_B_URL}
-
     except Exception as exc:
         import traceback
-        print("❌ 3‑D reconstruction critical error:", exc)
+        print("❌ Critical reconstruction error:", exc)
         print(traceback.format_exc())
-        
-        # Always return demo GLB instead of throwing HTTP error
-        print("⚡️ Critical error occurred, falling back to demo GLB")
+        # Always return the demo GLB rather than a 500
         return {"reconstruction_url": DEMO_GL_B_URL}
-
-
-# -----------------------------------------------------------------
-# 5.4 NEW: Check available 3D models (diagnostic endpoint)
-# -----------------------------------------------------------------
-@app.get("/available-models")
-async def get_available_models():
-    """
-    Diagnostic endpoint to check which 3D models are available.
-    Useful for debugging which models work with your API key.
-    """
-    available_models = []
-    test_image_url = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
-    
-    for model_name in FAL_3D_MODELS:
-        try:
-            # Test with minimal payload to see if model exists
-            test_payload = {"image_url": test_image_url}
-            
-            # Don't actually run the model (expensive), just check if it exists
-            # by testing the API endpoint
-            fal_client.run(model_name, arguments=test_payload)
-            available_models.append({"model": model_name, "status": "available"})
-            
-        except fal_client.client.FalClientError as e:
-            if "not found" in str(e).lower():
-                available_models.append({"model": model_name, "status": "not_found"})
-            elif "quota" in str(e).lower() or "limit" in str(e).lower():
-                available_models.append({"model": model_name, "status": "quota_exceeded"})
-            else:
-                available_models.append({"model": model_name, "status": "error", "error": str(e)})
-        except Exception as e:
-            # If it's not a "not found" error, the model probably exists but failed for other reasons
-            available_models.append({"model": model_name, "status": "exists_but_failed", "error": str(e)})
-    
-    return {
-        "available_models": available_models,
-        "demo_glb_url": DEMO_GL_B_URL
-    }
 
 
 # --------------------------------------------------------------
-# 6️⃣ Health‑check (unchanged)
+# 12️⃣  Diagnostic endpoint – which 3‑D models are available?
+# --------------------------------------------------------------
+@app.get("/available-models")
+async def get_available_models():
+    test_image_url = (
+        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYI"
+        "ChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcH"
+        "BwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoK"
+        "CggoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAA"
+        "AAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAA"
+        "AAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
+    )
+    available = []
+    for model_name in FAL_3D_MODELS:
+        try:
+            fal_client.run(model_name, arguments={"image_url": test_image_url})
+            available.append({"model": model_name, "status": "available"})
+        except fal_client.client.FalClientError as e:
+            txt = str(e).lower()
+            if "not found" in txt:
+                available.append({"model": model_name, "status": "not_found"})
+            elif "quota" in txt or "limit" in txt:
+                available.append({"model": model_name, "status": "quota_exceeded"})
+            else:
+                available.append(
+                    {"model": model_name, "status": "error", "error": str(e)}
+                )
+        except Exception as e:
+            available.append(
+                {
+                    "model": model_name,
+                    "status": "exists_but_failed",
+                    "error": str(e),
+                }
+            )
+    return {"available_models": available, "demo_glb_url": DEMO_GL_B_URL}
+
+
+# --------------------------------------------------------------
+# 13️⃣  Health‑check endpoint
 # --------------------------------------------------------------
 @app.get("/health")
 async def health_check():
