@@ -49,12 +49,7 @@ fal_client.api_key = FAL_KEY
 # --------------------------------------------------------------
 # 4️⃣  3‑D model slugs & demo GLB fallback
 # --------------------------------------------------------------
-FAL_3D_MODELS = [
-    "fal-ai/trellis",
-    "fal-ai/triposr",
-    "fal-ai/hyper3d",
-]
-
+FAL_3D_MODEL = "fal-ai/triposr"
 DEMO_GL_B_URL = "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
 
 # --------------------------------------------------------------
@@ -205,141 +200,57 @@ async def recolor_object(request: RecolorRequest):
 @app.post("/reconstruct")
 async def reconstruct_3d(request: ReconstructRequest):
     try:
-        print("🪐 Starting 3‑D reconstruction…")
+        print(f"🪐 Starting 3‑D reconstruction with {FAL_3D_MODEL}…")
         pil_img = base64_to_image(request.image_url)
-
         img_b64 = image_to_base64(pil_img, fmt="JPEG")
         image_data_url = f"data:image/jpeg;base64,{img_b64}"
 
-        for i, model_name in enumerate(FAL_3D_MODELS):
-            try:
-                print(
-                    f"🧪 Trying model {i + 1}/{len(FAL_3D_MODELS)}: {model_name}"
-                )
+        payload = {
+            "image_url": image_data_url,
+            "remove_background": True,
+            "foreground_ratio": 0.85,
+        }
 
-                # Payload varies per model
-                if model_name == "fal-ai/trellis":
-                    payload = {
-                        "image_url": image_data_url,
-                        "num_inference_steps": 20,
-                        "guidance_scale": 7.5,
-                    }
-                elif model_name == "fal-ai/triposr":
-                    payload = {
-                        "image_url": image_data_url,
-                        "remove_background": True,
-                        "foreground_ratio": 0.85,
-                    }
-                elif model_name == "fal-ai/hyper3d":
-                    payload = {
-                        "image_url": image_data_url,
-                        "quality": "high",
-                    }
-                else:
-                    payload = {"image_url": image_data_url}
+        result = fal_client.run(FAL_3D_MODEL, arguments=payload)
+        print(f"✅ {FAL_3D_MODEL} result keys:", list(result.keys()))
 
-                result = fal_client.run(model_name, arguments=payload)
-                print(f"✅ {model_name} keys:", list(result.keys()))
+        model_mesh = result.get("model_mesh", {})
+        mesh_url = model_mesh.get("url") if isinstance(model_mesh, dict) else None
 
-                # -----------------------------------------------------------------
-                # Extract the GLB URL – Fal can return it under many different keys
-                # -----------------------------------------------------------------
-                model_mesh = result.get("model_mesh", {})
-                mesh_url = (
-                    result.get("model_url")
-                    or result.get("mesh_url")
-                    or result.get("glb_url")
-                    or result.get("output_url")
-                    or (model_mesh.get("url") if isinstance(model_mesh, dict) else None)
-                    or (model_mesh if isinstance(model_mesh, str) else None)
-                )
-                print(f"🔍 Extracted mesh_url: {mesh_url}")
+        if not mesh_url:
+            print("❌ No mesh URL found in the result:", result)
+            raise HTTPException(
+                status_code=500,
+                detail=f"3D model '{FAL_3D_MODEL}' did not return a mesh URL.",
+            )
 
-                if mesh_url:
-                    return {
-                        "reconstruction_url": mesh_url,
-                        "model_info": {
-                            "model_used": model_name,
-                            "file_size": (
-                                model_mesh.get("file_size")
-                                if isinstance(model_mesh, dict)
-                                else None
-                            ),
-                            "content_type": (
-                                model_mesh.get("content_type")
-                                if isinstance(model_mesh, dict)
-                                else None
-                            ),
-                            "direct_download": mesh_url,
-                        },
-                    }
-                else:
-                    print(
-                        f"⚠️ {model_name} returned no mesh URL – trying next..."
-                    )
-            except fal_client.client.FalClientError as e:
-                msg = str(e).lower()
-                if "not found" in msg:
-                    print(f"❌ {model_name} not found – trying next")
-                elif "quota" in msg or "limit" in msg:
-                    print(f"⚠️ {model_name} quota exceeded – trying next")
-                else:
-                    print(f"❌ {model_name} error: {e}")
-            except Exception as e:
-                print(f"❌ Unexpected error for {model_name}: {e}")
+        print(f"✅ Successfully reconstructed 3D model: {mesh_url}")
+        return {
+            "reconstruction_url": mesh_url,
+            "model_info": {
+                "model_used": FAL_3D_MODEL,
+                "file_size": model_mesh.get("file_size"),
+                "content_type": model_mesh.get("content_type"),
+                "direct_download": mesh_url,
+            },
+        }
 
-        # If every model fails, fall back to the public demo GLB
-        print("⚠️ All models failed – returning demo GLB")
-        return {"reconstruction_url": DEMO_GL_B_URL}
+    except fal_client.client.FalClientError as e:
+        import traceback
+        print("❌ Fal Client Error:", e)
+        print(traceback.format_exc())
+        raise HTTPException(status_code=502, detail=f"Fal AI API error: {e}")
     except Exception as exc:
         import traceback
         print("❌ Critical reconstruction error:", exc)
         print(traceback.format_exc())
-        # Always return the demo GLB rather than a 500
-        return {"reconstruction_url": DEMO_GL_B_URL}
+        raise HTTPException(
+            status_code=500, detail=f"An unexpected error occurred: {exc}"
+        )
 
 
 # --------------------------------------------------------------
-# 12️⃣  Diagnostic endpoint – which 3‑D models are available?
-# --------------------------------------------------------------
-@app.get("/available-models")
-async def get_available_models():
-    test_image_url = (
-        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYI"
-        "ChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcH"
-        "BwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoK"
-        "CggoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAA"
-        "AAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAA"
-        "AAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
-    )
-    available = []
-    for model_name in FAL_3D_MODELS:
-        try:
-            fal_client.run(model_name, arguments={"image_url": test_image_url})
-            available.append({"model": model_name, "status": "available"})
-        except fal_client.client.FalClientError as e:
-            txt = str(e).lower()
-            if "not found" in txt:
-                available.append({"model": model_name, "status": "not_found"})
-            elif "quota" in txt or "limit" in txt:
-                available.append({"model": model_name, "status": "quota_exceeded"})
-            else:
-                available.append(
-                    {"model": model_name, "status": "error", "error": str(e)}
-                )
-        except Exception as e:
-            available.append(
-                {
-                    "model": model_name,
-                    "status": "exists_but_failed",
-                    "error": str(e),
-                }
-            )
-    return {"available_models": available, "demo_glb_url": DEMO_GL_B_URL}
-
-
-# --------------------------------------------------------------
-# 13️⃣  Health‑check endpoint
+# 12️⃣  Health‑check endpoint
 # --------------------------------------------------------------
 @app.get("/health")
 async def health_check():

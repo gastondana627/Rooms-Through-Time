@@ -1,7 +1,6 @@
 /* src/App.tsx */
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality } from '@google/genai';
-import * as fal from '@fal-ai/serverless-client';
 import { segment, recolor, reconstruct } from './api';
 
 /* --------------------------------------------------------------
@@ -26,6 +25,7 @@ const App: React.FC = () => {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [segments, setSegments] = useState<any[] | null>(null);
   const [reconstructionUrl, setReconstructionUrl] = useState<string | null>(null);
+  const [isReconstructing, setIsReconstructing] = useState<boolean>(false);
   const [modelInfo, setModelInfo] = useState<any>(null);
   const [showModelDetails, setShowModelDetails] = useState<boolean>(false);
 
@@ -326,7 +326,7 @@ const App: React.FC = () => {
       setError('Please generate or capture an image first.');
       return;
     }
-    setLoading(true);
+    setIsReconstructing(true);
     setError(null);
     setReconstructionUrl(null);
     setModelInfo(null);
@@ -338,7 +338,7 @@ const App: React.FC = () => {
       console.error('Reconstruct error:', err);
       setError('3D reconstruction failed.');
     } finally {
-      setLoading(false);
+      setIsReconstructing(false);
     }
   };
 
@@ -569,9 +569,10 @@ const App: React.FC = () => {
                   </button>
                   <button
                     onClick={handleReconstructImage}
-                    className="bg-yellow-600 hover:bg-yellow-700 py-2 px-4 rounded-lg"
+                    disabled={isReconstructing}
+                    className="bg-yellow-600 hover:bg-yellow-700 py-2 px-4 rounded-lg disabled:bg-yellow-800 disabled:cursor-not-allowed"
                   >
-                    Reconstruct in 3D
+                    {isReconstructing ? 'Reconstructing...' : 'Reconstruct in 3D'}
                   </button>
                   {navigator.share && (
                     <button
