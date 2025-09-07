@@ -1,5 +1,8 @@
+# railway.toml – minimal wrapper so Nixpacks does the heavy lifting
+
 [build]
-builder = "nixpacks"
+builder = "nixpacks"   # keep the builder line; Nixpacks will run the phases you defined.
 
 [deploy]
-startCommand = "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT"
+# Use Python’s module runner (works even when `uvicorn` binary isn’t on $PATH)
+startCommand = "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port $PORT"
