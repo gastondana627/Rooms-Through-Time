@@ -25,6 +25,8 @@ const App: React.FC = () => {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [segments, setSegments] = useState<any[] | null>(null);
   const [reconstructionUrl, setReconstructionUrl] = useState<string | null>(null);
+  const [modelInfo, setModelInfo] = useState<any>(null);
+  const [showModelDetails, setShowModelDetails] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -117,6 +119,7 @@ const App: React.FC = () => {
     setCapturedImage(null);
     setSegments(null);
     setReconstructionUrl(null);
+    setModelInfo(null);
     try {
       const response = await ai.models.generateImages({
         model: 'imagen-4.0-generate-001',
@@ -148,6 +151,7 @@ const App: React.FC = () => {
     setImageUrl(null);
     setSegments(null);
     setReconstructionUrl(null);
+    setModelInfo(null);
     setIsCameraActive(true);
   };
 
@@ -177,6 +181,7 @@ const App: React.FC = () => {
     setError(null);
     setImageUrl(null);
     setReconstructionUrl(null);
+    setModelInfo(null);
 
     const parsed = parseDataUrl(capturedImage);
     if (!parsed) {
@@ -200,7 +205,7 @@ const App: React.FC = () => {
                 },
               },
               {
-                text: `Give me a concise description (max 30 words) of how this room would look after being redesigned in a ${selectedCategory} style.`,
+                text: `Give me a concise description (max 30 words) of how this room would look after being redesigned in a ${selectedCategory} style.`,
               },
             ],
           },
@@ -252,6 +257,7 @@ const App: React.FC = () => {
     setCapturedImage(null);
     setSegments(null);
     setReconstructionUrl(null);
+    setModelInfo(null);
     stopCamera();
   };
 
@@ -345,7 +351,7 @@ const App: React.FC = () => {
     }
   };
 
-  /** ------------ 3‑D Reconstruction (Fal) ------------ */
+  /** ------------ 3‑D Reconstruction (Enhanced) ------------ */
   const handleReconstructImage = async () => {
     if (!imageUrl) {
       setError('Please generate or capture an image first.');
@@ -354,6 +360,7 @@ const App: React.FC = () => {
     setLoading(true);
     setError(null);
     setReconstructionUrl(null);
+    setModelInfo(null);
     try {
       const res = await fetch(`${API_BASE_URL}/reconstruct`, {
         method: 'POST',
@@ -363,11 +370,36 @@ const App: React.FC = () => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const result = await res.json();
       setReconstructionUrl(result.reconstruction_url);
+      setModelInfo(result.model_info);
     } catch (err) {
       console.error('Reconstruct error:', err);
       setError('3D reconstruction failed.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** ------------ 3D Model Utility Functions ------------ */
+  const handleDownloadGLB = () => {
+    if (modelInfo?.direct_download) {
+      const link = document.createElement('a');
+      link.href = modelInfo.direct_download;
+      link.download = `room-3d-model.glb`;
+      link.target = '_blank';
+      link.click();
+    }
+  };
+
+  const handleOpenGLB = () => {
+    if (modelInfo?.direct_download) {
+      window.open(modelInfo.direct_download, '_blank');
+    }
+  };
+
+  const handleCopyGLBUrl = () => {
+    if (modelInfo?.direct_download) {
+      navigator.clipboard.writeText(modelInfo.direct_download);
+      alert('GLB URL copied to clipboard!');
     }
   };
 
@@ -568,7 +600,7 @@ const App: React.FC = () => {
                   </button>
                   <button
                     onClick={handleSegmentImage}
-                    className="bg-pink-600 hover:pink-700 py-2 px-4 rounded-lg"
+                    className="bg-pink-600 hover:bg-pink-700 py-2 px-4 rounded-lg"
                   >
                     Magic Edit
                   </button>
@@ -590,6 +622,60 @@ const App: React.FC = () => {
               )}
             </div>
           </div>
+          
+          {/* Enhanced 3D Model Controls */}
+          {reconstructionUrl && modelInfo && (
+            <div className="mt-6 p-4 bg-gray-800 rounded-lg border border-gray-600">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold text-white">3D Model Ready</h3>
+                <button
+                  onClick={() => setShowModelDetails(!showModelDetails)}
+                  className="text-indigo-400 hover:text-indigo-300"
+                >
+                  {showModelDetails ? 'Hide Details' : 'Show Details'}
+                </button>
+              </div>
+              
+              <div className="flex flex-wrap gap-3 mb-3">
+                <button
+                  onClick={handleDownloadGLB}
+                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"
+                >
+                  Download GLB File
+                </button>
+                <button
+                  onClick={handleOpenGLB}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
+                >
+                  Open in New Tab
+                </button>
+                <button
+                  onClick={handleCopyGLBUrl}
+                  className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg"
+                >
+                  Copy URL
+                </button>
+              </div>
+              
+              {showModelDetails && modelInfo && (
+                <div className="text-sm text-gray-300 space-y-1">
+                  <p><strong>Model:</strong> {modelInfo.model_used}</p>
+                  <p><strong>File Size:</strong> {modelInfo.file_size ? `${Math.round(modelInfo.file_size / 1024)} KB` : 'Unknown'}</p>
+                  <p><strong>Format:</strong> {modelInfo.content_type || 'GLB'}</p>
+                  <p><strong>Direct URL:</strong> 
+                    <a 
+                      href={modelInfo.direct_download} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-indigo-400 hover:text-indigo-300 ml-1 break-all"
+                    >
+                      {modelInfo.direct_download}
+                    </a>
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </footer>
       </main>
     </div>

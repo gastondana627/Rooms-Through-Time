@@ -196,7 +196,7 @@ async def recolor_object(request: RecolorRequest):
 
 
 # -----------------------------------------------------------------
-# 5.3  3‑D reconstruction (COMPLETELY REWRITTEN WITH WORKING MODELS)
+# 5.3  3‑D reconstruction (FIXED TO EXTRACT model_mesh.url)
 # -----------------------------------------------------------------
 @app.post("/reconstruct")
 async def reconstruct_3d(request: ReconstructRequest):
@@ -254,17 +254,31 @@ async def reconstruct_3d(request: ReconstructRequest):
                     else:
                         print(f"🔍 model_mesh content: {str(model_mesh)[:200]}...")
 
-                # Different models return different field names
+                # FIXED: Extract URL from different possible locations
+                model_mesh = result.get("model_mesh", {})
                 mesh_url = (
                     result.get("model_url") or 
                     result.get("mesh_url") or 
                     result.get("glb_url") or
-                    result.get("output_url")
+                    result.get("output_url") or
+                    # THE KEY FIX: Extract from model_mesh.url
+                    (model_mesh.get("url") if isinstance(model_mesh, dict) else None) or
+                    (model_mesh if isinstance(model_mesh, str) else None)
                 )
+                
+                print(f"🔍 Extracted mesh_url: {mesh_url}")
 
                 if mesh_url:
                     print(f"🎉 3‑D reconstruction successful with {model_name}!")
-                    return {"reconstruction_url": mesh_url}
+                    return {
+                        "reconstruction_url": mesh_url,
+                        "model_info": {
+                            "model_used": model_name,
+                            "file_size": model_mesh.get("file_size"),
+                            "content_type": model_mesh.get("content_type"),
+                            "direct_download": mesh_url  # For user access
+                        }
+                    }
                 else:
                     print(f"⚠️ {model_name} returned no mesh URL, trying next model...")
                     continue
