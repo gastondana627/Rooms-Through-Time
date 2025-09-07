@@ -18,6 +18,7 @@ load_dotenv()                     # .env → os.environ
 app = FastAPI(title="AI Room Designer API")
 
 # Allow the Vite dev server (both http & https) to call the API
+# Updated CORS configuration for main.py
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -25,9 +26,11 @@ app.add_middleware(
         "https://localhost:5173",
         "http://127.0.0.1:5173",
         "https://127.0.0.1:5173",
-        "https://rooms-through-time.vercel.app",          # Vercel front‑end
-        "https://rooms-through-time.vercel.app/",        # trailing slash
-        "https://rooms-through-time-production.up.railway.app",  # <-- NEW
+        "http://127.0.0.1:8000",                                     # Local backend
+        "https://rooms-through-time.vercel.app",                    # Vercel frontend
+        "https://rooms-through-time.vercel.app/",                   # Vercel with slash
+        "https://rooms-through-time-production.up.railway.app",     # Railway monorepo (same domain for frontend + backend)
+        "https://rooms-through-time-production.up.railway.app/",    # Railway with slash
     ],
     allow_credentials=True,
     allow_methods=["*"],
