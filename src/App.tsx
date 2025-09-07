@@ -8,6 +8,8 @@ import * as fal from '@fal-ai/serverless-client';
    from the <script> tag in index.html.  The TypeScript declaration
    lives in src/model-viewer.d.ts, so the JSX tag is recognised.
 -------------------------------------------------------------- */
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+
 
 const API_KEY = import.meta.env.VITE_GOOGLE_AI_API_KEY;
 
