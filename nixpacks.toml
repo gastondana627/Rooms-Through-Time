@@ -4,8 +4,8 @@
 providers = ["python", "node"]
 
 [phases.setup]
-# Use Python 3.10 and Node.js 20
-nixPkgs = ["python310", "nodejs-20_x"]
+# Use Python 3.10 and Node.js 20 (with the correct Nix package name)
+nixPkgs = ["python310", "nodejs_20"]
 
 [phases.install]
 # Install both Python and Node dependencies
