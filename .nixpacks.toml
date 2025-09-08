@@ -1,17 +1,24 @@
+# nixpacks.toml
+
+# 1. Define the providers (languages) we need
+providers = ["python", "node"]
+
 [phases.setup]
-nixPkgs = ["python311", "nodejs_20_x"]
+# Use Python 3.10 and Node.js 20
+nixPkgs = ["python310", "nodejs-20_x"]
 
 [phases.install]
+# Install both Python and Node dependencies
 cmds = [
-  "pip install -r backend/requirements.txt",
-  "npm ci"
+    "pip install --upgrade pip",
+    "pip install -r requirements.txt", 
+    "npm install"
 ]
 
-[ph.build]
-# Vite will output to “dist” by default
+[phases.build]
+# Build the frontend
 cmds = ["npm run build"]
 
 [start]
-# Same fix – no cd into backend
-command = "python3 -m uvicorn main:app --host 0.0.0.0 --port $PORT"
-
+# The command to start the Python server
+cmd = "python3 -m uvicorn main:app --host 0.0.0.0 --port $PORT"
