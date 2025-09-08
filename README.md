@@ -118,3 +118,6 @@ Start the FastAPI server.
 Make sure you have added the Railway domain to CORS in backend/main.py (you already did).
 License
 MIT – feel free to fork, modify, and deploy.
+
+
+
