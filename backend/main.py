@@ -3,7 +3,7 @@
 # --------------------------------------------------------------
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles          # <-- NEW import
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import fal_client
 import base64
@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 # --------------------------------------------------------------
 # 1️⃣  Load env‑vars & start FastAPI
 # --------------------------------------------------------------
-load_dotenv()                     # .env → os.environ
+load_dotenv()
 app = FastAPI(title="AI Room Designer API")
 
 # --------------------------------------------------------------
@@ -28,9 +28,9 @@ app.add_middleware(
         "https://localhost:5173",
         "http://127.0.0.1:5173",
         "https://127.0.0.1:5173",
-        "http://127.0.0.1:8000",                     # local backend
-        "https://rooms-through-time.vercel.app",      # Vercel‑hosted UI (if you ever use it)
-        "https://rooms-through-time-production.up.railway.app",  # Railway UI + API
+        "http://127.0.0.1:8000",
+        "https://rooms-through-time.vercel.app",
+        "https://rooms-through-time-production.up.railway.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -61,55 +61,36 @@ DEMO_GL_B_URL = "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
 # 5️⃣  Pydantic request models
 # --------------------------------------------------------------
 class SegmentRequest(BaseModel):
-    image_url: str               # data:image/...;base64,XXXXX
-
+    image_url: str
 
 class RecolorRequest(BaseModel):
-    image_url: str               # original image (data‑url)
-    mask: dict                   # {"mask": "<base64‑png>"}
-    color: list                  # [R, G, B] ints 0‑255
-
+    image_url: str
+    mask: dict
+    color: list
 
 class ReconstructRequest(BaseModel):
-    image_url: str               # data‑url of the image we want to turn into 3‑D
-
+    image_url: str
 
 # --------------------------------------------------------------
 # 6️⃣  Helper utilities – base64 ↔ Pillow.Image
 # --------------------------------------------------------------
 def base64_to_image(b64: str) -> Image.Image:
-    """Convert a data‑url or raw base64 string into a Pillow Image."""
     if b64.startswith("data:image"):
-        b64 = b64.split(",", 1)[1]        # strip the mime‑type prefix
+        b64 = b64.split(",", 1)[1]
     img_bytes = base64.b64decode(b64.strip())
     img = Image.open(io.BytesIO(img_bytes))
     return img.convert("RGB") if img.mode != "RGB" else img
 
-
 def image_to_base64(image: Image.Image, fmt: str = "JPEG") -> str:
-    """Encode a Pillow Image to a base64 string (no data‑url prefix)."""
     buf = io.BytesIO()
     if fmt.upper() == "JPEG" and image.mode != "RGB":
         image = image.convert("RGB")
     image.save(buf, format=fmt)
     return base64.b64encode(buf.getvalue()).decode()
 
-
-# --------------------------------------------------------------
-# 7️⃣  **Serve the Vite build** (monorepo mode)
-# --------------------------------------------------------------
-# After `npm run build` the static files are placed in ./dist.
-# When the container starts its working directory is /app,
-# so "./dist" is the correct relative path.
-if os.path.isdir("dist"):
-    # `html=True` makes FastAPI fallback to index.html for any unknown route,
-    # which lets React handle client‑side routing.
-    app.mount(
-        "/",                     # everything under the root URL
-        StaticFiles(directory="dist", html=True),
-        name="frontend",
-    )
-    print("✅ Static front‑end mounted from ./dist")
+# ==============================================================
+# ✅ CHANGE: ALL API ROUTES ARE NOW DEFINED *BEFORE* THE STATIC MOUNT
+# ==============================================================
 
 # --------------------------------------------------------------
 # 8️⃣  Root endpoint (simple health)
@@ -126,20 +107,14 @@ async def segment_image(request: SegmentRequest):
     try:
         print("🔍 Starting image segmentation…")
         pil_img = base64_to_image(request.image_url)
-        img_b64 = image_to_base64(pil_img)          # JPEG for Fal
+        img_b64 = image_to_base64(pil_img)
 
         w, h = pil_img.size
         centre = [w // 2, h // 2]
 
         payload = {
             "image_url": f"data:image/jpeg;base64,{img_b64}",
-            "prompts": [
-                {
-                    "type": "point",
-                    "point_coords": [centre],
-                    "point_labels": [1],
-                }
-            ],
+            "prompts": [{"type": "point", "point_coords": [centre], "point_labels": [1]}],
             "multimask_output": True,
         }
 
@@ -148,45 +123,32 @@ async def segment_image(request: SegmentRequest):
         segments = []
         for i, mask_info in enumerate(result.get("masks", [])):
             mask_url = mask_info["mask"]
-            mask_b64 = (
-                mask_url.split(",", 1)[1]
-                if mask_url.startswith("data:")
-                else mask_url
-            )
+            mask_b64 = mask_url.split(",", 1)[1] if mask_url.startswith("data:") else mask_url
             segments.append(
-                {
-                    "label": f"Object {i + 1}",
-                    "mask": mask_b64,
-                    "confidence": mask_info.get("score", 0.8),
-                }
+                {"label": f"Object {i + 1}", "mask": mask_b64, "confidence": mask_info.get("score", 0.8)}
             )
         return {"segments": segments}
     except Exception as exc:
         import traceback
         print("❌ Segmentation error:", exc)
         print(traceback.format_exc())
-        raise HTTPException(
-            status_code=500, detail=f"Segmentation failed: {exc}"
-        )
-
+        raise HTTPException(status_code=500, detail=f"Segmentation failed: {exc}")
 
 # --------------------------------------------------------------
-# 10️⃣  Recolor
+# 10️⃣ Recolor
 # --------------------------------------------------------------
 @app.post("/recolor")
 async def recolor_object(request: RecolorRequest):
     try:
         img = base64_to_image(request.image_url)
-
         mask_b64 = request.mask.get("mask", "")
         if not mask_b64:
             raise ValueError("Mask payload is empty")
         mask_bytes = base64.b64decode(mask_b64)
-        mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")   # 8‑bit mask
+        mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")
 
-        colour = tuple(request.color)                # (R, G, B)
+        colour = tuple(request.color)
         overlay = Image.new("RGB", img.size, colour)
-
         recoloured = Image.composite(overlay, img, mask_img)
 
         recoloured_b64 = image_to_base64(recoloured, fmt="JPEG")
@@ -195,62 +157,39 @@ async def recolor_object(request: RecolorRequest):
         import traceback
         print("❌ Recolor error:", exc)
         print(traceback.format_exc())
-        # Return original image so UI never crashes
         return {"image_url": request.image_url}
 
-
 # --------------------------------------------------------------
-# 11️⃣  3‑D Reconstruction
+# 11️⃣ 3‑D Reconstruction
 # --------------------------------------------------------------
 @app.post("/reconstruct")
 async def reconstruct_3d(request: ReconstructRequest):
     try:
         print("🪐 Starting 3‑D reconstruction…")
         pil_img = base64_to_image(request.image_url)
-
         img_b64 = image_to_base64(pil_img, fmt="JPEG")
         image_data_url = f"data:image/jpeg;base64,{img_b64}"
 
         for i, model_name in enumerate(FAL_3D_MODELS):
             try:
-                print(
-                    f"🧪 Trying model {i + 1}/{len(FAL_3D_MODELS)}: {model_name}"
-                )
-
-                # Payload varies per model
+                print(f"🧪 Trying model {i + 1}/{len(FAL_3D_MODELS)}: {model_name}")
+                
                 if model_name == "fal-ai/trellis":
-                    payload = {
-                        "image_url": image_data_url,
-                        "num_inference_steps": 20,
-                        "guidance_scale": 7.5,
-                    }
+                    payload = {"image_url": image_data_url, "num_inference_steps": 20, "guidance_scale": 7.5}
                 elif model_name == "fal-ai/triposr":
-                    payload = {
-                        "image_url": image_data_url,
-                        "remove_background": True,
-                        "foreground_ratio": 0.85,
-                    }
+                    payload = {"image_url": image_data_url, "remove_background": True, "foreground_ratio": 0.85}
                 elif model_name == "fal-ai/hyper3d":
-                    payload = {
-                        "image_url": image_data_url,
-                        "quality": "high",
-                    }
+                    payload = {"image_url": image_data_url, "quality": "high"}
                 else:
                     payload = {"image_url": image_data_url}
 
                 result = fal_client.run(model_name, arguments=payload)
                 print(f"✅ {model_name} keys:", list(result.keys()))
-
-                # -----------------------------------------------------------------
-                # Extract the GLB URL – Fal can return it under many different keys
-                # -----------------------------------------------------------------
+                
                 model_mesh = result.get("model_mesh", {})
                 mesh_url = (
-                    result.get("model_url")
-                    or result.get("mesh_url")
-                    or result.get("glb_url")
-                    or result.get("output_url")
-                    or (model_mesh.get("url") if isinstance(model_mesh, dict) else None)
+                    result.get("model_url") or result.get("mesh_url") or result.get("glb_url")
+                    or result.get("output_url") or (model_mesh.get("url") if isinstance(model_mesh, dict) else None)
                     or (model_mesh if isinstance(model_mesh, str) else None)
                 )
                 print(f"🔍 Extracted mesh_url: {mesh_url}")
@@ -260,58 +199,35 @@ async def reconstruct_3d(request: ReconstructRequest):
                         "reconstruction_url": mesh_url,
                         "model_info": {
                             "model_used": model_name,
-                            "file_size": (
-                                model_mesh.get("file_size")
-                                if isinstance(model_mesh, dict)
-                                else None
-                            ),
-                            "content_type": (
-                                model_mesh.get("content_type")
-                                if isinstance(model_mesh, dict)
-                                else None
-                            ),
+                            "file_size": (model_mesh.get("file_size") if isinstance(model_mesh, dict) else None),
+                            "content_type": (model_mesh.get("content_type") if isinstance(model_mesh, dict) else None),
                             "direct_download": mesh_url,
                         },
                     }
                 else:
-                    print(
-                        f"⚠️ {model_name} returned no mesh URL – trying next..."
-                    )
+                    print(f"⚠️ {model_name} returned no mesh URL – trying next...")
             except fal_client.client.FalClientError as e:
                 msg = str(e).lower()
-                if "not found" in msg:
-                    print(f"❌ {model_name} not found – trying next")
-                elif "quota" in msg or "limit" in msg:
-                    print(f"⚠️ {model_name} quota exceeded – trying next")
-                else:
-                    print(f"❌ {model_name} error: {e}")
+                if "not found" in msg: print(f"❌ {model_name} not found – trying next")
+                elif "quota" in msg or "limit" in msg: print(f"⚠️ {model_name} quota exceeded – trying next")
+                else: print(f"❌ {model_name} error: {e}")
             except Exception as e:
                 print(f"❌ Unexpected error for {model_name}: {e}")
 
-        # If every model fails, fall back to the public demo GLB
         print("⚠️ All models failed – returning demo GLB")
         return {"reconstruction_url": DEMO_GL_B_URL}
     except Exception as exc:
         import traceback
         print("❌ Critical reconstruction error:", exc)
         print(traceback.format_exc())
-        # Always return the demo GLB rather than a 500
         return {"reconstruction_url": DEMO_GL_B_URL}
 
-
 # --------------------------------------------------------------
-# 12️⃣  Diagnostic endpoint – which 3‑D models are available?
+# 12️⃣ Diagnostic endpoint – which 3‑D models are available?
 # --------------------------------------------------------------
 @app.get("/available-models")
 async def get_available_models():
-    test_image_url = (
-        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYI"
-        "ChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcH"
-        "BwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoK"
-        "CggoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAA"
-        "AAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAA"
-        "AAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
-    )
+    test_image_url = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCggoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
     available = []
     for model_name in FAL_3D_MODELS:
         try:
@@ -319,29 +235,24 @@ async def get_available_models():
             available.append({"model": model_name, "status": "available"})
         except fal_client.client.FalClientError as e:
             txt = str(e).lower()
-            if "not found" in txt:
-                available.append({"model": model_name, "status": "not_found"})
-            elif "quota" in txt or "limit" in txt:
-                available.append({"model": model_name, "status": "quota_exceeded"})
-            else:
-                available.append(
-                    {"model": model_name, "status": "error", "error": str(e)}
-                )
+            if "not found" in txt: available.append({"model": model_name, "status": "not_found"})
+            elif "quota" in txt or "limit" in txt: available.append({"model": model_name, "status": "quota_exceeded"})
+            else: available.append({"model": model_name, "status": "error", "error": str(e)})
         except Exception as e:
-            available.append(
-                {
-                    "model": model_name,
-                    "status": "exists_but_failed",
-                    "error": str(e),
-                }
-            )
+            available.append({"model": model_name, "status": "exists_but_failed", "error": str(e)})
     return {"available_models": available, "demo_glb_url": DEMO_GL_B_URL}
 
-
 # --------------------------------------------------------------
-# 13️⃣  Health‑check endpoint
+# 13️⃣ Health‑check endpoint
 # --------------------------------------------------------------
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "fal_api_configured": bool(FAL_KEY)}
 
+# --------------------------------------------------------------
+# ✅ CHANGE: MOVED THE STATIC FILE MOUNT TO THE VERY END
+# --------------------------------------------------------------
+# This must come *after* all the API routes are defined.
+if os.path.isdir("dist"):
+    app.mount("/", StaticFiles(directory="dist", html=True), name="frontend")
+    print("✅ Static front‑end mounted from ./dist")
