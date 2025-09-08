@@ -1,71 +1,32 @@
-// src/api.ts
+/* src/api.ts */
 
-/**
- * Determines the base URL for the API.
- * In development, it uses a relative path to leverage the Vite proxy.
- * In production, it uses the full URL provided by an environment variable.
- */
-/**
- * Determines the base URL for the API.
- * - In dev: relative path, Vite proxy handles backend
- * - In prod: explicit env var VITE_API_BASE_URL
- */
-const API_BASE_URL = import.meta.env.PROD
-? import.meta.env.VITE_API_BASE_URL || ''
-: '';
+// A generic helper for calling our backend endpoints
+const callBackend = async (endpoint: string, body: any, method: 'GET' | 'POST' = 'POST') => {
+  const options: RequestInit = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (method === 'POST') {
+    options.body = JSON.stringify(body);
+  }
+  
+  const response = await fetch(endpoint, options);
 
-if (import.meta.env.PROD && !import.meta.env.VITE_API_BASE_URL) {
-console.error("FATAL: VITE_API_BASE_URL is not set in the production environment!");
-}
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`Backend error for ${endpoint}:`, errorBody);
+    throw new Error(`Request to ${endpoint} failed.`);
+  }
+  return await response.json();
+};
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-const url = `${API_BASE_URL}${endpoint}`;
+// All functions now use the reliable backend
+export const generateFalImage = (input: { prompt: string }) => callBackend('/generate-fal-image', input);
+export const redesignFalImage = (input: { image_url: string; prompt: string }) => callBackend('/redesign-fal-image', input);
+export const segment = (input: { image_url: string }) => callBackend('/segment', input);
+export const reconstruct = (input: { image_url: string }) => callBackend('/reconstruct', input);
+export const recolor = (input: any) => callBackend('/recolor', input);
+export const generateVoiceover = (input: { image_url: string; style: string }) => callBackend('/generate-voiceover', input);
 
-const res = await fetch(url, {
-  headers: { "Content-Type": "application/json" },
-  ...options,
-});
-
-if (!res.ok) {
-  const errorBody = await res.text();
-  console.error(`[API ERROR] ${res.status} ${res.statusText}`, errorBody);
-  throw new Error(`API error: ${res.status} ${res.statusText}`);
-}
-
-return res.json() as Promise<T>;
-}
-
-// ---- API wrappers for Railway Backend ----
-
-export async function segment(data: { image_url: string | null }) {
-return request<any>("/segment", {
-  method: "POST",
-  body: JSON.stringify(data),
-});
-}
-
-export async function recolor(data: {
-image_url: string | null;
-mask: any;
-color: number[];
-}) {
-return request<any>("/recolor", {
-  method: "POST",
-  body: JSON.stringify(data),
-});
-}
-
-export async function reconstruct(data: { image_url: string | null }) {
-return request<any>("/reconstruct", {
-  method: "POST",
-  body: JSON.stringify(data),
-});
-}
-
-// ✅ NEW: Generate voiceover
-export async function generateVoiceover(data: { image_url: string; style: string }) {
-return request<any>("/generate-voiceover", {
-  method: "POST",
-  body: JSON.stringify(data),
-});
-}
+// ✅ NEW: The missing function to call the quote endpoint.
+export const getDesignerQuote = () => callBackend('/get-designer-quote', null, 'GET');

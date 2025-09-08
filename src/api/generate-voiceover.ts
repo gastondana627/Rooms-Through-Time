@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import ElevenLabs from 'elevenlabs';
+import { ElevenLabs } from '@elevenlabs/elevenlabs-js';
 
 export default async function handler(
   req: VercelRequest,

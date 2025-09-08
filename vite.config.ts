@@ -19,14 +19,16 @@ function getHttpsOptions() {
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    'process.env': {}
+  },
   server: {
     https: getHttpsOptions(),
     open: true,
-    // This proxy is essential for local development to avoid CORS/Mixed-Content errors
     proxy: {
-      // ✅ CHANGED: Added 'generate-voiceover' to the list of proxied paths
-      '^/(reconstruct|segment|health|recolor|generate-voiceover)': {
-        target: 'http://127.0.0.1:8000', // Your Python backend
+      // ✅ UPDATED: Added the new redesign endpoint to the proxy rule.
+      '^/(generate-fal-image|generate-voiceover|segment|recolor|reconstruct|health|description.mp3|redesign-fal-image)': {
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

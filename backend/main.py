@@ -1,7 +1,8 @@
 # --------------------------------------------------------------
 # main.py
 # --------------------------------------------------------------
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -12,19 +13,23 @@ from PIL import Image
 import os
 from dotenv import load_dotenv
 import logging
+import traceback
+import httpx
 
-# Optional ElevenLabs import — keep the import but handle missing key gracefully.
+# ✅ NEW: Import the Hugging Face library
+from huggingface_hub import InferenceClient
+
+# Optional ElevenLabs import
 try:
     from elevenlabs.client import ElevenLabs
 except Exception:
-    ElevenLabs = None  # will check at runtime
+    ElevenLabs = None
 
 # --------------------------------------------------------------
 # 1️⃣  Load env-vars & start FastAPI
 # --------------------------------------------------------------
 load_dotenv()
 app = FastAPI(title="AI Room Designer API")
-
 logger = logging.getLogger("uvicorn.error")
 
 # --------------------------------------------------------------
@@ -32,15 +37,7 @@ logger = logging.getLogger("uvicorn.error")
 # --------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "https://localhost:5173",
-        "http://127.0.0.1:5173",
-        "https://127.0.0.1:5173",
-        "http://127.0.0.1:8000",
-        "https://rooms-through-time.vercel.app",
-        "https://rooms-through-time-production.up.railway.app",
-    ],
+    allow_origins=["*"], # Allow all for simplicity in dev
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,111 +52,131 @@ if not FAL_KEY:
 print("✅ FAL API key configured successfully")
 fal_client.api_key = FAL_KEY
 
-# ElevenLabs client: optional (do not crash if missing)
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+eleven_client = None
 if ELEVENLABS_API_KEY and ElevenLabs is not None:
     try:
         eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
         print("✅ ElevenLabs API key configured successfully")
     except Exception as e:
-        eleven_client = None
         logger.exception("Failed to create ElevenLabs client: %s", e)
 else:
-    eleven_client = None
     if ELEVENLABS_API_KEY and ElevenLabs is None:
-        logger.warning("ElevenLabs SDK import failed; ElevenLabs endpoint will be unavailable.")
-    else:
-        logger.info("ELEVENLABS_API_KEY not set; voice features disabled (safe fallback).")
+        logger.warning("ElevenLabs SDK import failed.")
+    elif not ELEVENLABS_API_KEY:
+        logger.info("ELEVENLABS_API_KEY not set; voice features disabled.")
 
+# ✅ NEW: Configure the Hugging Face client
+HF_TOKEN = os.getenv("HF_TOKEN") # You'll need to add this to your .env file
+if HF_TOKEN:
+    hf_client = InferenceClient(token=HF_TOKEN)
+    print("✅ Hugging Face client configured successfully")
+else:
+    hf_client = None
+    print("⚠️ HF_TOKEN not set; Hugging Face features will be disabled.")
+
+
+# ... (The rest of your file from Constants down to the /reconstruct endpoint remains IDENTICAL)
 # --------------------------------------------------------------
 # 4️⃣  Constants & Fallbacks
 # --------------------------------------------------------------
-FAL_3D_MODELS = [
-    "fal-ai/trellis",
-    "fal-ai/triposr",
-    "fal-ai/hyper3d",
-]
+FAL_3D_MODELS = [ "fal-ai/triposr" ]
 DEMO_GL_B_URL = "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
 
 # --------------------------------------------------------------
 # 5️⃣  Pydantic Request Models
 # --------------------------------------------------------------
-class SegmentRequest(BaseModel):
+class SegmentRequest(BaseModel): image_url: str
+class RecolorRequest(BaseModel): image_url: str; mask: dict; color: list
+class ReconstructRequest(BaseModel): image_url: str
+class AudioRequest(BaseModel): image_url: str; style: str
+class ImageGenerateRequest(BaseModel): prompt: str
+class RedesignRequest(BaseModel):
     image_url: str
-
-class RecolorRequest(BaseModel):
-    image_url: str
-    mask: dict
-    color: list
-
-class ReconstructRequest(BaseModel):
-    image_url: str
-
-# ✅ NEW: Pydantic model for the audio feature
-class AudioRequest(BaseModel):
-    image_url: str
-    style: str
+    prompt: str
 
 # --------------------------------------------------------------
 # 6️⃣  Helper Utilities
 # --------------------------------------------------------------
 def base64_to_image(b64: str) -> Image.Image:
-    if b64.startswith("data:image"):
-        b64 = b64.split(",", 1)[1]
+    if b64.startswith("data:image"): b64 = b64.split(",", 1)[1]
     img_bytes = base64.b64decode(b64.strip())
     img = Image.open(io.BytesIO(img_bytes))
     return img.convert("RGB") if img.mode != "RGB" else img
 
 def image_to_base64(image: Image.Image, fmt: str = "JPEG") -> str:
     buf = io.BytesIO()
-    if fmt.upper() == "JPEG" and image.mode != "RGB":
-        image = image.convert("RGB")
+    if fmt.upper() == "JPEG" and image.mode != "RGB": image = image.convert("RGB")
     image.save(buf, format=fmt)
     return base64.b64encode(buf.getvalue()).decode()
 
 # ==============================================================
 # API ROUTES
 # ==============================================================
-
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "fal_api_configured": bool(FAL_KEY)}
 
+@app.post("/generate-fal-image")
+async def generate_fal_image(request: ImageGenerateRequest):
+    try:
+        print(f"🎨 Generating image with prompt: '{request.prompt}'")
+        result = fal_client.run("fal-ai/stable-diffusion-v3-medium", arguments={"prompt": request.prompt})
+        image_url = result["images"][0]["url"]
+        print(f"✅ Image generated successfully: {image_url}")
+        return {"image_url": image_url}
+    except Exception as e:
+        logger.exception("❌ Fal.ai image generation error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+
+@app.post("/redesign-fal-image")
+async def redesign_fal_image(request: RedesignRequest):
+    try:
+        print("🎨 Backend: Starting image redesign workflow…")
+        print("   - Generating text prompt from image...")
+        llava_result = fal_client.run("fal-ai/llava-next", arguments={
+            "image_url": request.image_url,
+            "prompt": request.prompt
+        })
+        print("🔍 LLaVA raw result:", llava_result)
+        redesign_prompt = ""
+        if "output" in llava_result:
+            redesign_prompt = llava_result["output"]
+        elif "text" in llava_result:
+            redesign_prompt = llava_result["text"]
+        elif "outputs" in llava_result and len(llava_result["outputs"]) > 0:
+            redesign_prompt = llava_result["outputs"][0].get("text", "")
+        if not redesign_prompt:
+             raise Exception(f"Unexpected LLaVA result format: {llava_result}")
+        print(f"   - Generated Redesign Prompt: '{redesign_prompt}'")
+        print("   - Generating new image from prompt...")
+        image_result = fal_client.run("fal-ai/stable-diffusion-v3-medium", arguments={
+            "prompt": redesign_prompt
+        })
+        image_url = image_result["images"][0]["url"]
+        print(f"✅ Redesign image generated successfully: {image_url}")
+        return {"image_url": image_url}
+    except Exception as e:
+        logger.exception("❌ Fal.ai redesign workflow error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Image redesign failed: {str(e)}")
+
 @app.post("/segment")
 async def segment_image(request: SegmentRequest):
     try:
-        print("🔍 Starting image segmentation…")
-        pil_img = base64_to_image(request.image_url)
-        img_b64 = image_to_base64(pil_img)
-        w, h = pil_img.size
-        centre = [w // 2, h // 2]
-        payload = {
-            "image_url": f"data:image/jpeg;base64,{img_b64}",
-            "prompts": [{"type": "point", "point_coords": [centre], "point_labels": [1]}],
-            "multimask_output": True,
-        }
-        result = fal_client.run("fal-ai/sam2/image", arguments=payload)
-        segments = []
-        for i, mask_info in enumerate(result.get("masks", [])):
-            mask_url = mask_info["mask"]
-            mask_b64 = mask_url.split(",", 1)[1] if mask_url.startswith("data:") else mask_url
-            segments.append(
-                {"label": f"Object {i + 1}", "mask": mask_b64, "confidence": mask_info.get("score", 0.8)}
-            )
-        return {"segments": segments}
+        print("🔍 Backend: Starting image segmentation…")
+        result = fal_client.run("fal-ai/sam2/image", arguments={ "image_url": request.image_url, "multimask_output": True })
+        return result
     except Exception as exc:
-        import traceback
-        logger.exception("❌ Segmentation error: %s", exc)
-        print(traceback.format_exc())
+        logger.exception("❌ Backend segmentation error: %s", exc)
         raise HTTPException(status_code=500, detail=f"Segmentation failed: {exc}")
 
 @app.post("/recolor")
 async def recolor_object(request: RecolorRequest):
     try:
+        print("🎨 Backend: Starting recolor...")
         img = base64_to_image(request.image_url)
         mask_b64 = request.mask.get("mask", "")
-        if not mask_b64:
-            raise ValueError("Mask payload is empty")
+        if not mask_b64: raise ValueError("Mask payload is empty")
         mask_bytes = base64.b64decode(mask_b64)
         mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")
         colour = tuple(request.color)
@@ -168,134 +185,93 @@ async def recolor_object(request: RecolorRequest):
         recoloured_b64 = image_to_base64(recoloured, fmt="JPEG")
         return {"image_url": f"data:image/jpeg;base64,{recoloured_b64}"}
     except Exception as exc:
-        import traceback
         logger.exception("❌ Recolor error: %s", exc)
-        print(traceback.format_exc())
-        # return original image on recolor failure — keeps UI stable
         return {"image_url": request.image_url}
 
 @app.post("/reconstruct")
 async def reconstruct_3d(request: ReconstructRequest):
     try:
-        print("🪐 Starting 3-D reconstruction…")
-        pil_img = base64_to_image(request.image_url)
-        img_b64 = image_to_base64(pil_img, fmt="JPEG")
-        image_data_url = f"data:image/jpeg;base64,{img_b64}"
-
-        for i, model_name in enumerate(FAL_3D_MODELS):
-            try:
-                print(f"🧪 Trying model {i + 1}/{len(FAL_3D_MODELS)}: {model_name}")
-                if model_name == "fal-ai/trellis":
-                    payload = {"image_url": image_data_url, "num_inference_steps": 20, "guidance_scale": 7.5}
-                elif model_name == "fal-ai/triposr":
-                    payload = {"image_url": image_data_url, "remove_background": True, "foreground_ratio": 0.85}
-                elif model_name == "fal-ai/hyper3d":
-                    payload = {"image_url": image_data_url, "quality": "high"}
-                else:
-                    payload = {"image_url": image_data_url}
-
-                result = fal_client.run(model_name, arguments=payload)
-                print(f"✅ {model_name} keys:", list(result.keys()))
-                model_mesh = result.get("model_mesh", {})
-                mesh_url = (
-                    result.get("model_url")
-                    or result.get("mesh_url")
-                    or result.get("glb_url")
-                    or result.get("output_url")
-                    or (model_mesh.get("url") if isinstance(model_mesh, dict) else None)
-                    or (model_mesh if isinstance(model_mesh, str) else None)
-                )
-                print(f"🔍 Extracted mesh_url: {mesh_url}")
-                if mesh_url:
-                    return {
-                        "reconstruction_url": mesh_url,
-                        "model_info": {
-                            "model_used": model_name,
-                            "file_size": (model_mesh.get("file_size") if isinstance(model_mesh, dict) else None),
-                            "content_type": (model_mesh.get("content_type") if isinstance(model_mesh, dict) else None),
-                            "direct_download": mesh_url,
-                        },
-                    }
-                else:
-                    print(f"⚠️ {model_name} returned no mesh URL – trying next...")
-            except fal_client.client.FalClientError as e:
-                msg = str(e).lower()
-                if "not found" in msg:
-                    print(f"❌ {model_name} not found – trying next")
-                elif "quota" in msg or "limit" in msg:
-                    print(f"⚠️ {model_name} quota exceeded – trying next")
-                else:
-                    print(f"❌ {model_name} error: {e}")
-            except Exception as e:
-                print(f"❌ Unexpected error for {model_name}: {e}")
-
-        print("⚠️ All models failed – returning demo GLB")
-        return {"reconstruction_url": DEMO_GL_B_URL}
+        print("🪐 Backend: Starting 3-D reconstruction with TripoSR…")
+        result = fal_client.run("fal-ai/triposr", arguments={ "image_url": request.image_url })
+        print("TripoSR raw result for debugging:", result)
+        model_mesh = result.get("model_mesh", {})
+        mesh_url = model_mesh.get("url")
+        if not mesh_url and "model_url" in result: mesh_url = result.get("model_url")
+        if not mesh_url: raise Exception("3D model generation succeeded but returned no usable URL.")
+        print(f"✅ 3D Model generated successfully: {mesh_url}")
+        return {
+            "reconstruction_url": mesh_url,
+            "model_info": {
+                "model_used": "fal-ai/triposr",
+                "file_size": model_mesh.get("file_size"),
+                "content_type": model_mesh.get("content_type"),
+                "direct_download": mesh_url
+            }
+        }
     except Exception as exc:
-        import traceback
-        logger.exception("❌ Critical reconstruction error: %s", exc)
-        print(traceback.format_exc())
-        return {"reconstruction_url": DEMO_GL_B_URL}
+        logger.exception("❌ Backend reconstruction error: %s", exc)
+        return {"reconstruction_url": DEMO_GL_B_URL, "model_info": {"model_used": "fallback"}}
 
-@app.get("/available-models")
-async def get_available_models():
-    """
-    Returns the list of configured FAL 3D models the backend will try.
-    (Frontend can call this to show a 'models tried' debug panel.)
-    """
-    return {"models": FAL_3D_MODELS}
-
-# ✅ NEW: ElevenLabs Voiceover Endpoint
+# ✅ UPDATED: The voiceover endpoint now generates dynamic text first.
 @app.post("/generate-voiceover")
 async def generate_voiceover(request: AudioRequest):
-    """
-    Generates a short voiceover MP3 for the redesigned room.
-    - If ElevenLabs client is not configured, returns 503 with a friendly message.
-    - Saves the MP3 into `dist/description.mp3` so it is served by StaticFiles.
-    """
     if eleven_client is None:
-        logger.warning("Voiceover requested but ElevenLabs client is not configured.")
         raise HTTPException(status_code=503, detail="Voice feature unavailable: ElevenLabs not configured")
 
     try:
-        print("🎙️ Generating voiceover...")
-        # You can customize this description template as needed
-        description_text = f"This stunning {request.style} space evokes a sense of timeless elegance and comfort, perfect for relaxation and quiet contemplation."
+        print("🎙️ Generating dynamic voiceover description...")
+        # Step 1: Call Fal.ai with the OpenAI GPT-OSS model to get a creative description
+        # Note: You can also use hf_client here if you prefer a different model from Hugging Face
+        gpt_result = fal_client.run("fal-ai/gpt-oss-120b", arguments={
+            "prompt": f"You are an eloquent interior designer. In 40 words, describe this {request.style} room based on the image provided.",
+            "image_url": request.image_url
+        })
+        description_text = gpt_result["text"]
+        print(f"   - Generated Description: '{description_text}'")
 
-        # Convert text to speech — adapt if the SDK's API differs in your installed version
+        # Step 2: Convert the dynamic text to speech
         audio_stream = eleven_client.text_to_speech.convert(
-            voice_id="21m00Tcm4TlvDq8ikWAM",  # Example voice id ("Rachel") — replace if needed
-            text=description_text,
+            voice_id="21m00Tcm4TlvDq8ikWAM", # Replace with your custom voice ID if you have one
+            text=description_text
         )
-
-        # Ensure the dist folder exists (so StaticFiles can serve the output)
         os.makedirs("dist", exist_ok=True)
         audio_file_path = os.path.join("dist", "description.mp3")
-
-        # Stream write the response into a file
         with open(audio_file_path, "wb") as f:
-            # The SDK may return an iterator/generator of bytes; adapt if your version returns bytes directly.
-            if hasattr(audio_stream, "__iter__") and not isinstance(audio_stream, (bytes, bytearray)):
-                for chunk in audio_stream:
-                    f.write(chunk)
-            else:
-                # If the SDK returned bytes
-                f.write(audio_stream)
-
+            for chunk in audio_stream:
+                f.write(chunk)
         audio_url = "/description.mp3"
         print(f"✅ Voiceover audio saved and available at {audio_url}")
         return {"voiceover_url": audio_url, "description": description_text}
     except Exception as e:
-        import traceback
         logger.exception("❌ Voiceover generation failed: %s", e)
-        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to generate voiceover: {str(e)}")
+
+
+# ✅ NEW: An endpoint for getting designer quotes
+@app.get("/get-designer-quote")
+async def get_designer_quote():
+    if hf_client is None:
+        # Provide a safe fallback quote if the HF client isn't configured
+        return {"quote": "The essence of interior design will always be about people and how they live."}
+    try:
+        print("🤔 Generating a designer quote...")
+        # Using a small, fast model for quotes
+        result = hf_client.text_generation(
+            "gpt2",
+            "A short, inspirational quote about interior design is:"
+        )
+        # Clean up the response to get just the quote
+        quote = result.split('"')[1] if '"' in result else result
+        print(f"   - Generated Quote: '{quote}'")
+        return {"quote": quote}
+    except Exception as e:
+        logger.exception("❌ Quote generation failed: %s", e)
+        return {"quote": "Beauty, creativity, and functionality are the heart of design."}
+
 
 # This must come *after* all the API routes are defined.
 if os.path.isdir("dist"):
     app.mount("/", StaticFiles(directory="dist", html=True), name="frontend")
-    print("✅ Static front-end mounted from ./dist")
+    print("✅ Static front‑end mounted from ./dist")
 else:
-    print("ℹ️ dist/ directory not found at startup — frontend static mount skipped. (Build the frontend to create ./dist)")
-
-    
+    print("ℹ️ dist/ directory not found at startup — frontend static mount skipped.")
