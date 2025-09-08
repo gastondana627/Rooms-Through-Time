@@ -13,6 +13,8 @@
     "@fal-ai/serverless-client": "^0.5.3",
     "@google/genai": "^1.17.0",
     "@google/model-viewer": "^4.1.0",
+    "@vercel/node": "^5.3.21",
+    "elevenlabs": "^1.59.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

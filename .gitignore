@@ -128,3 +128,4 @@ __pycache__/
 # Or be more specific if you prefer
 localhost-key.pem
 localhost.pem
+.vercel

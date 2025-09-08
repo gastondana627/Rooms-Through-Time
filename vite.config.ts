@@ -24,7 +24,8 @@ export default defineConfig({
     open: true,
     // This proxy is essential for local development to avoid CORS/Mixed-Content errors
     proxy: {
-      '^/(reconstruct|segment|health|recolor)': {
+      // ✅ CHANGED: Added 'generate-voiceover' to the list of proxied paths
+      '^/(reconstruct|segment|health|recolor|generate-voiceover)': {
         target: 'http://127.0.0.1:8000', // Your Python backend
         changeOrigin: true,
       },

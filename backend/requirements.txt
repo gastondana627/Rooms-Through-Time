@@ -7,3 +7,4 @@ fal-client==0.7.0
 pillow==10.1.0
 python-dotenv==1.0.0
 pydantic==2.5.0
+elevenlabs>=1.0.0
