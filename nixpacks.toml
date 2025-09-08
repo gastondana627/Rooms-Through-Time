@@ -1,26 +1,19 @@
 # nixpacks.toml
 
 [phases.setup]
-# Install system-level packages: Python 3.10 and Node.js 20
 pkgs = ["python310", "nodejs_20"]
 
 [phases.install]
-# All commands for installing dependencies
 cmds = [
-    # Install pip using the system's package manager for reliability
     "apt-get update && apt-get install -y python3-pip",
-    
-    # Install the Python packages from the correct file path
     "pip install -r backend/requirements.txt --break-system-packages",
-    
-    # Install the Node.js packages
     "npm install"
 ]
 
 [phases.build]
-# Build the React frontend
 cmds = ["npm run build"]
 
 [start]
-# Start the Uvicorn server, telling it where to find the 'main.py' file
+# This start command in here will be IGNORED by Railway because
+# you have one in railway.toml, which is fine.
 cmd = "python3 -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
