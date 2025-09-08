@@ -344,3 +344,4 @@ async def get_available_models():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "fal_api_configured": bool(FAL_KEY)}
+

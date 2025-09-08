@@ -4,6 +4,7 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import * as fal from '@fal-ai/serverless-client';
 import { segment, recolor, reconstruct } from './api';
 
+
 /* --------------------------------------------------------------
    Do **NOT** import '@google/model-viewer' – the component is loaded
    from the <script> tag in index.html.  The TypeScript declaration
@@ -293,7 +294,8 @@ const App: React.FC = () => {
     setError(null);
     setSegments(null);
     try {
-      const result = await segment(imageUrl);
+      // ✅ CHANGED: Pass data as an object
+      const result = await segment({ image_url: imageUrl });
       setSegments(result.segments);
     } catch (err) {
       console.error(err);
@@ -309,7 +311,12 @@ const App: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await recolor(imageUrl, segment, [139, 92, 246]);
+      // ✅ CHANGED: Pass data as an object
+      const result = await recolor({
+        image_url: imageUrl,
+        mask: segment,
+        color: [139, 92, 246],
+      });
       setImageUrl(result.image_url);
       setSegments(null);
     } catch (err) {
@@ -331,7 +338,8 @@ const App: React.FC = () => {
     setReconstructionUrl(null);
     setModelInfo(null);
     try {
-      const result = await reconstruct(imageUrl);
+      // ✅ CHANGED: Pass data as an object
+      const result = await reconstruct({ image_url: imageUrl });
       setReconstructionUrl(result.reconstruction_url);
       setModelInfo(result.model_info);
     } catch (err) {

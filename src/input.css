@@ -1,8 +1,5 @@
-/* src/input.css -------------------------------------------------
-   This file is the entry‑point for Tailwind CSS.  All of the
-   utilities you use in your React components are generated from
-   these three @tailwind directives.
------------------------------------------------------------------ */
+
+/* src/input.css - Tailwind CSS v4 - No @apply needed */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
