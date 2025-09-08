@@ -9,6 +9,7 @@ pkgs = [
 
 [phases.install]
 # Combine system package installation with dependency installation.
+# This ensures pip is available in the same shell that uses it.
 cmds = [
     "apt-get update && apt-get install -y python3-pip",
     # Add the flag below to comply with PEP 668
