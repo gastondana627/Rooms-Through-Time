@@ -2,17 +2,17 @@
 
 [phases.setup]
 # Explicitly define the exact packages we need.
-# This prevents Nixpacks from auto-detecting and adding its own.
 pkgs = [
     "python310",
-    "nodejs_20",
-    "pip"
+    "nodejs_20"
 ]
 
 [phases.install]
-# Install both Python and Node dependencies
+# Combine system package installation with dependency installation.
+# This ensures pip is available in the same shell that uses it.
 cmds = [
-    "pip install -r requirements.txt", 
+    "apt-get update && apt-get install -y python3-pip", # Install pip using the system's package manager
+    "pip install -r requirements.txt",
     "npm install"
 ]
 
