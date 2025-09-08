@@ -1,26 +1,17 @@
 # nixpacks.toml
 
 [phases.setup]
-# Explicitly define the exact packages we need.
-pkgs = [
-    "python310",
-    "nodejs_20"
-]
+pkgs = ["python310", "nodejs_20"]
 
 [phases.install]
-# Combine system package installation with dependency installation.
-# This ensures pip is available in the same shell that uses it.
 cmds = [
     "apt-get update && apt-get install -y python3-pip",
-    # Add the flag below to comply with PEP 668
-    "pip install -r requirements.txt --break-system-packages",
+    "pip install -r backend/requirements.txt --break-system-packages",
     "npm install"
 ]
 
 [phases.build]
-# Build the frontend
 cmds = ["npm run build"]
 
 [start]
-# The command to start the Python server
 cmd = "python3 -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
