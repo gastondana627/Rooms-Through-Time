@@ -95,9 +95,9 @@ def image_to_base64(image: Image.Image, fmt: str = "JPEG") -> str:
 # --------------------------------------------------------------
 # 8️⃣  Root endpoint (simple health)
 # --------------------------------------------------------------
-@app.get("/")
-async def root():
-    return {"message": "AI Room Designer API is running"}
+#@app.get("/")
+#async def root():
+#    return {"message": "AI Room Designer API is running"}
 
 # --------------------------------------------------------------
 # 9️⃣  Image Segmentation
