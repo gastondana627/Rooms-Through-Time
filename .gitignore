@@ -129,3 +129,29 @@ __pycache__/
 localhost-key.pem
 localhost.pem
 .vercel
+
+
+
+# Environment files
+.env*
+!.env.example
+
+# Build output
+public/
+
+# Deployment scripts
+deploy.sh
+switch-env.sh
+
+# Test scripts
+test-*.js
+
+# Node modules (if applicable)
+node_modules/
+
+# IDE/Editor files
+.vscode/
+.DS_Store
+
+# Ignore Markdown documentation files
+*.md
