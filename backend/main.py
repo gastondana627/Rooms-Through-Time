@@ -15,9 +15,7 @@ from dotenv import load_dotenv
 import logging
 import traceback
 import httpx
-
-# ✅ NEW: Import the Hugging Face library
-from huggingface_hub import InferenceClient
+import random
 
 # Optional ElevenLabs import
 try:
@@ -66,22 +64,20 @@ else:
     elif not ELEVENLABS_API_KEY:
         logger.info("ELEVENLABS_API_KEY not set; voice features disabled.")
 
-# ✅ NEW: Configure the Hugging Face client
-HF_TOKEN = os.getenv("HF_TOKEN") # You'll need to add this to your .env file
-if HF_TOKEN:
-    hf_client = InferenceClient(token=HF_TOKEN)
-    print("✅ Hugging Face client configured successfully")
-else:
-    hf_client = None
-    print("⚠️ HF_TOKEN not set; Hugging Face features will be disabled.")
-
-
-# ... (The rest of your file from Constants down to the /reconstruct endpoint remains IDENTICAL)
 # --------------------------------------------------------------
-# 4️⃣  Constants & Fallbacks
+# 4️⃣  Constants & Data
 # --------------------------------------------------------------
 FAL_3D_MODELS = [ "fal-ai/triposr" ]
 DEMO_GL_B_URL = "https://modelviewer.dev/shared-assets/models/Astronaut.glb"
+
+DESIGNER_QUOTES = [
+    "Have nothing in your house that you do not know to be useful, or believe to be beautiful.",
+    "The essence of interior design will always be about people and how they live.",
+    "A room should never allow the eye to settle in one place. It should smile at you and create fantasy.",
+    "Design is a plan for arranging elements in such a way as best to accomplish a particular purpose.",
+    "The best rooms have something to say about the people who live in them.",
+    "Innovation is often the ability to reach into the past and bring back what is good, what is beautiful, what is useful, what is lasting."
+]
 
 # --------------------------------------------------------------
 # 5️⃣  Pydantic Request Models
@@ -134,25 +130,16 @@ async def redesign_fal_image(request: RedesignRequest):
     try:
         print("🎨 Backend: Starting image redesign workflow…")
         print("   - Generating text prompt from image...")
-        llava_result = fal_client.run("fal-ai/llava-next", arguments={
-            "image_url": request.image_url,
-            "prompt": request.prompt
-        })
+        llava_result = fal_client.run("fal-ai/llava-next", arguments={ "image_url": request.image_url, "prompt": request.prompt })
         print("🔍 LLaVA raw result:", llava_result)
         redesign_prompt = ""
-        if "output" in llava_result:
-            redesign_prompt = llava_result["output"]
-        elif "text" in llava_result:
-            redesign_prompt = llava_result["text"]
-        elif "outputs" in llava_result and len(llava_result["outputs"]) > 0:
-            redesign_prompt = llava_result["outputs"][0].get("text", "")
-        if not redesign_prompt:
-             raise Exception(f"Unexpected LLaVA result format: {llava_result}")
+        if "output" in llava_result: redesign_prompt = llava_result["output"]
+        elif "text" in llava_result: redesign_prompt = llava_result["text"]
+        elif "outputs" in llava_result and len(llava_result["outputs"]) > 0: redesign_prompt = llava_result["outputs"][0].get("text", "")
+        if not redesign_prompt: raise Exception(f"Unexpected LLaVA result format: {llava_result}")
         print(f"   - Generated Redesign Prompt: '{redesign_prompt}'")
         print("   - Generating new image from prompt...")
-        image_result = fal_client.run("fal-ai/stable-diffusion-v3-medium", arguments={
-            "prompt": redesign_prompt
-        })
+        image_result = fal_client.run("fal-ai/stable-diffusion-v3-medium", arguments={ "prompt": redesign_prompt })
         image_url = image_result["images"][0]["url"]
         print(f"✅ Redesign image generated successfully: {image_url}")
         return {"image_url": image_url}
@@ -160,11 +147,16 @@ async def redesign_fal_image(request: RedesignRequest):
         logger.exception("❌ Fal.ai redesign workflow error: %s", e)
         raise HTTPException(status_code=500, detail=f"Image redesign failed: {str(e)}")
 
+# ✅ UPDATED: The /segment endpoint now uses a text prompt to get detailed object masks.
 @app.post("/segment")
 async def segment_image(request: SegmentRequest):
     try:
         print("🔍 Backend: Starting image segmentation…")
-        result = fal_client.run("fal-ai/sam2/image", arguments={ "image_url": request.image_url, "multimask_output": True })
+        result = fal_client.run("fal-ai/sam2/image", arguments={
+            "image_url": request.image_url,
+            "prompts": [{ "type": "text", "data": "everything" }],
+            "multimask_output": True
+        })
         return result
     except Exception as exc:
         logger.exception("❌ Backend segmentation error: %s", exc)
@@ -177,6 +169,7 @@ async def recolor_object(request: RecolorRequest):
         img = base64_to_image(request.image_url)
         mask_b64 = request.mask.get("mask", "")
         if not mask_b64: raise ValueError("Mask payload is empty")
+        if mask_b64.startswith("data:image"): mask_b64 = mask_b64.split(",", 1)[1]
         mask_bytes = base64.b64decode(mask_b64)
         mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")
         colour = tuple(request.color)
@@ -199,46 +192,28 @@ async def reconstruct_3d(request: ReconstructRequest):
         if not mesh_url and "model_url" in result: mesh_url = result.get("model_url")
         if not mesh_url: raise Exception("3D model generation succeeded but returned no usable URL.")
         print(f"✅ 3D Model generated successfully: {mesh_url}")
-        return {
-            "reconstruction_url": mesh_url,
-            "model_info": {
-                "model_used": "fal-ai/triposr",
-                "file_size": model_mesh.get("file_size"),
-                "content_type": model_mesh.get("content_type"),
-                "direct_download": mesh_url
-            }
-        }
+        return { "reconstruction_url": mesh_url, "model_info": { "model_used": "fal-ai/triposr", "file_size": model_mesh.get("file_size"), "content_type": model_mesh.get("content_type"), "direct_download": mesh_url } }
     except Exception as exc:
         logger.exception("❌ Backend reconstruction error: %s", exc)
         return {"reconstruction_url": DEMO_GL_B_URL, "model_info": {"model_used": "fallback"}}
 
-# ✅ UPDATED: The voiceover endpoint now generates dynamic text first.
 @app.post("/generate-voiceover")
 async def generate_voiceover(request: AudioRequest):
     if eleven_client is None:
-        raise HTTPException(status_code=503, detail="Voice feature unavailable: ElevenLabs not configured")
-
+        raise HTTPException(status_code=503, detail="Voice feature unavailable")
     try:
         print("🎙️ Generating dynamic voiceover description...")
-        # Step 1: Call Fal.ai with the OpenAI GPT-OSS model to get a creative description
-        # Note: You can also use hf_client here if you prefer a different model from Hugging Face
-        gpt_result = fal_client.run("fal-ai/gpt-oss-120b", arguments={
-            "prompt": f"You are an eloquent interior designer. In 40 words, describe this {request.style} room based on the image provided.",
+        gpt_result = fal_client.run("fal-ai/llava-next", arguments={
+            "prompt": f"You are an eloquent interior designer. In under 40 words, describe this {request.style} room.",
             "image_url": request.image_url
         })
-        description_text = gpt_result["text"]
+        description_text = gpt_result["output"]
         print(f"   - Generated Description: '{description_text}'")
-
-        # Step 2: Convert the dynamic text to speech
-        audio_stream = eleven_client.text_to_speech.convert(
-            voice_id="21m00Tcm4TlvDq8ikWAM", # Replace with your custom voice ID if you have one
-            text=description_text
-        )
+        audio_stream = eleven_client.text_to_speech.convert( voice_id="21m00Tcm4TlvDq8ikWAM", text=description_text )
         os.makedirs("dist", exist_ok=True)
         audio_file_path = os.path.join("dist", "description.mp3")
         with open(audio_file_path, "wb") as f:
-            for chunk in audio_stream:
-                f.write(chunk)
+            for chunk in audio_stream: f.write(chunk)
         audio_url = "/description.mp3"
         print(f"✅ Voiceover audio saved and available at {audio_url}")
         return {"voiceover_url": audio_url, "description": description_text}
@@ -246,28 +221,12 @@ async def generate_voiceover(request: AudioRequest):
         logger.exception("❌ Voiceover generation failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to generate voiceover: {str(e)}")
 
-
-# ✅ NEW: An endpoint for getting designer quotes
 @app.get("/get-designer-quote")
 async def get_designer_quote():
-    if hf_client is None:
-        # Provide a safe fallback quote if the HF client isn't configured
-        return {"quote": "The essence of interior design will always be about people and how they live."}
-    try:
-        print("🤔 Generating a designer quote...")
-        # Using a small, fast model for quotes
-        result = hf_client.text_generation(
-            "gpt2",
-            "A short, inspirational quote about interior design is:"
-        )
-        # Clean up the response to get just the quote
-        quote = result.split('"')[1] if '"' in result else result
-        print(f"   - Generated Quote: '{quote}'")
-        return {"quote": quote}
-    except Exception as e:
-        logger.exception("❌ Quote generation failed: %s", e)
-        return {"quote": "Beauty, creativity, and functionality are the heart of design."}
-
+    print("🤔 Selecting a designer quote...")
+    quote = random.choice(DESIGNER_QUOTES)
+    print(f"   - Selected Quote: '{quote}'")
+    return {"quote": quote}
 
 # This must come *after* all the API routes are defined.
 if os.path.isdir("dist"):

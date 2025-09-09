@@ -1,5 +1,16 @@
+/* In src/input.css */
 
-/* src/input.css - Tailwind CSS v4 - No @apply needed */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  /* Style for the main circular action buttons */
+  .action-button {
+    @apply h-12 w-12 rounded-full bg-black/40 text-white backdrop-blur-lg flex items-center justify-center transition-all hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  /* Style for the 3D viewer buttons */
+  .three-d-button {
+    @apply px-4 py-2 bg-black/50 backdrop-blur-md rounded-lg text-white font-semibold transition-colors hover:bg-black/70 border border-white/10;
+  }
+}

@@ -1,7 +1,16 @@
 /* src/App.tsx */
 import React, { useState, useRef, useEffect } from 'react';
-// ✅ UPDATED: Add the new getDesignerQuote function
 import { segment, recolor, reconstruct, generateVoiceover, generateFalImage, redesignFalImage, getDesignerQuote } from './api';
+
+// Import your newly created icon components
+import { EyeIcon } from './components/EyeIcon';
+import { CubeIcon } from './components/CubeIcon';
+import { SoundIcon } from './components/SoundIcon';
+import { DownloadIcon } from './components/DownloadIcon';
+import { ShareIcon } from './components/ShareIcon';
+import { PaletteIcon } from './components/PaletteIcon';
+import { XIcon } from './components/XIcon';
+import { PlayIcon } from './components/PlayIcon'; // Assuming you create a PlayIcon as well
 
 const App: React.FC = () => {
   // --- STATE ---
@@ -15,11 +24,8 @@ const App: React.FC = () => {
   const [segments, setSegments] = useState<any[] | null>(null);
   const [reconstructionUrl, setReconstructionUrl] = useState<string | null>(null);
   const [modelInfo, setModelInfo] = useState<any>(null);
-  const [showModelDetails, setShowModelDetails] = useState<boolean>(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isAudioLoading, setIsAudioLoading] = useState<boolean>(false);
-  
-  // ✅ NEW: Add state to hold the designer quote
   const [quote, setQuote] = useState<string | null>(null);
 
   // --- REFS & CONSTANTS ---
@@ -29,7 +35,6 @@ const App: React.FC = () => {
 
   // --- EFFECTS ---
   
-  // Camera Effect
   useEffect(() => {
     let stream: MediaStream | null = null;
     const startCamera = async () => {
@@ -57,16 +62,16 @@ const App: React.FC = () => {
     return () => { if (stream) stream.getTracks().forEach(t => t.stop()); };
   }, [isCameraActive]);
 
-  // ✅ NEW: Quote Fetcher Effect
   useEffect(() => {
-    if (loading) {
-      setQuote(null); // Reset previous quote
+    if (loading && !quote) {
       getDesignerQuote()
         .then(data => setQuote(data.quote))
         .catch(err => {
           console.error("Failed to fetch quote:", err);
-          setQuote("Design is thinking made visual."); // Fallback quote
+          setQuote("Design is thinking made visual.");
         });
+    } else if (!loading) {
+        setQuote(null);
     }
   }, [loading]);
 
@@ -154,12 +159,35 @@ const App: React.FC = () => {
     return new File([blob], fileName, { type: blob.type });
   };
 
-  const handleSaveImage = () => {
+  const handleSaveImage = async () => {
     if (!imageUrl) return;
-    const link = document.createElement('a');
-    link.href = imageUrl;
-    link.download = `ai-room-${selectedCategory.toLowerCase()}.jpeg`;
-    link.click();
+    
+    try {
+      // Fetch the image as a blob to ensure proper download
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ai-room-${selectedCategory.toLowerCase()}.jpeg`;
+      document.body.appendChild(link); // Ensure link is in DOM
+      link.click();
+      document.body.removeChild(link); // Clean up
+      
+      // Clean up the object URL
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download image:', error);
+      // Fallback to original method if fetch fails
+      const link = document.createElement('a');
+      link.href = imageUrl;
+      link.download = `ai-room-${selectedCategory.toLowerCase()}.jpeg`;
+      link.target = '_self'; // Ensure it doesn't open in new window
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   const handleShareImage = async () => {
@@ -177,21 +205,37 @@ const App: React.FC = () => {
     setLoading(true); setError(null); setSegments(null);
     try {
       const result = await segment({ image_url: imageUrl });
-      setSegments(result.masks);
-    } catch (err) { console.error(err); setError('Segmentation failed.');
-    } finally { setLoading(false); }
+      if (result.masks && result.masks.length > 0) {
+        setSegments(result.masks);
+      } else {
+        throw new Error("Segmentation response did not contain any masks.");
+      }
+    } catch (err) { 
+      console.error(err); 
+      setError('Segmentation failed.');
+    } finally { 
+      setLoading(false); 
+    }
   };
 
-  const handleRecolorObject = async (segment: any) => {
+  const handleRecolorObject = async (maskData: any) => {
     if (!imageUrl) return;
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     try {
-      // The recolor logic is client-side, so it needs to be handled differently
-      // This is a placeholder for now as the `recolor` function in api.ts is a simple proxy
-      // For a real implementation, this would involve more complex client-side logic or a dedicated backend endpoint
-      console.log("Recoloring is a placeholder.", segment);
-    } catch (err) { console.error(err); setError('Recolor failed.');
-    } finally { setLoading(false); }
+      const result = await recolor({
+        image_url: imageUrl,
+        mask: maskData,
+        color: [139, 92, 246]
+      });
+      setImageUrl(result.image_url);
+      setSegments(null);
+    } catch (err) { 
+      console.error(err); 
+      setError('Recolor failed.');
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   const handleReconstructImage = async () => {
@@ -201,8 +245,12 @@ const App: React.FC = () => {
       const result = await reconstruct({ image_url: imageUrl });
       setReconstructionUrl(result.reconstruction_url);
       setModelInfo(result.model_info);
-    } catch (err) { console.error('Reconstruct error:', err); setError('3D reconstruction failed.');
-    } finally { setLoading(false); }
+    } catch (err) { 
+      console.error('Reconstruct error:', err); 
+      setError('3D reconstruction failed.');
+    } finally { 
+      setLoading(false); 
+    }
   };
   
   const handleGenerateAudio = async () => {
@@ -245,7 +293,6 @@ const App: React.FC = () => {
 
   // --- RENDER LOGIC ---
   const renderContent = () => {
-    // ✅ UPDATED: The loading state now displays the quote
     if (loading) {
       return (
         <div className="flex flex-col items-center justify-center h-full text-white">
@@ -259,10 +306,46 @@ const App: React.FC = () => {
         </div>
       );
     }
-    if (reconstructionUrl) { return ( <model-viewer src={reconstructionUrl} alt="3D Room Reconstruction" camera-controls auto-rotate style={{ width: '100%', height: '100%' }} onError={e => { console.error('model-viewer load error:', e); setError('Unable to load the 3‑D model.'); setReconstructionUrl(null); }} /> ); }
-    if (imageUrl && segments) { return ( <div className="relative w-full h-full"><img src={imageUrl} className="w-full h-full object-contain" alt="Room for editing"/>{segments.map((s, i) => ( <div key={i} onClick={() => handleRecolorObject(s)} style={{ WebkitMaskImage: `url(${s.mask})`, maskImage: `url(${s.mask})`, backgroundColor: 'rgba(139, 92, 246, 0.7)', }} className="absolute inset-0 opacity-80 hover:opacity-100 transition-opacity cursor-pointer" /> ))}</div> ); }
+    if (reconstructionUrl) { 
+      return (
+        <div className="relative w-full h-full">
+          <model-viewer 
+            src={reconstructionUrl} 
+            alt="3D Room Reconstruction" 
+            camera-controls 
+            auto-rotate 
+            style={{ width: '100%', height: '100%' }} 
+            onError={e => { console.error('model-viewer load error:', e); setError('Unable to load the 3‑D model.'); setReconstructionUrl(null); }} 
+          />
+          <div className="absolute bottom-4 right-4 flex flex-col gap-2">
+            <button onClick={handleDownloadGLB} className="three-d-button">Download GLB</button>
+            <button onClick={handleOpenGLB} className="three-d-button">Open in New Tab</button>
+            <button onClick={handleCopyGLBUrl} className="three-d-button">Copy URL</button>
+            <button onClick={() => { setReconstructionUrl(null); setModelInfo(null); }} className="three-d-button mt-2">Close</button>
+          </div>
+        </div>
+      ); 
+    }
+    if (imageUrl) { 
+      return (
+        <div className="relative w-full h-full">
+          <img src={imageUrl} className="w-full h-full object-contain" alt="Generated or redesigned room"/>
+          {segments && segments.map((s, i) => ( 
+            <div 
+              key={i} 
+              onClick={() => handleRecolorObject(s)} 
+              style={{ 
+                WebkitMaskImage: `url(${s.mask})`, 
+                maskImage: `url(${s.mask})`, 
+                backgroundColor: 'rgba(139, 92, 246, 0.7)', 
+              }} 
+              className="absolute inset-0 opacity-80 hover:opacity-100 transition-opacity cursor-pointer" 
+            /> 
+          ))}
+        </div> 
+      );
+    }
     if (isCameraActive) return ( <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" /> );
-    if (imageUrl) return <img src={imageUrl} className="w-full h-full object-contain" alt="Generated or redesigned room"/>;
     if (capturedImage) return <img src={capturedImage} className="w-full h-full object-contain" alt="User's room for redesign"/>;
     return ( <div className="flex items-center justify-center h-full text-gray-400">Your image will appear here</div> );
   };
@@ -294,56 +377,68 @@ const App: React.FC = () => {
             {categories.map(c => ( <button key={c} onClick={() => setSelectedCategory(c)} className={`px-4 py-2 rounded-lg transition-colors ${ selectedCategory === c ? 'bg-indigo-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600' }`} >{c}</button>))}
           </div>
         </div>
-        <div className="flex-1 bg-gray-900 p-2 min-h-[400px] md:min-h-[500px]">
+        
+        {/* The main content area now contains the contextual action bar */}
+        <div className="flex-1 bg-gray-900 p-2 min-h-[400px] md:min-h-[500px] relative">
           <div className="bg-black w-full h-full rounded-lg flex items-center justify-center relative">
             {renderContent()}
             <canvas ref={canvasRef} className="hidden" />
           </div>
+
+          {/* Contextual Action Bar */}
+          {imageUrl && !loading && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+              <div className="flex items-center gap-2 p-2 bg-black/50 backdrop-blur-md rounded-full border border-white/10 shadow-lg">
+                
+                {segments ? (
+                  <>
+                    <button onClick={() => handleRecolorObject(segments[Math.floor(Math.random() * segments.length)])} className="action-button" title="Recolor Random Object">
+                        <PaletteIcon />
+                    </button>
+                    <button onClick={() => setSegments(null)} className="action-button" title="Exit AI Vision">
+                        <XIcon />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={handleSegmentImage} className="action-button" title="Activate AI Vision">
+                      <EyeIcon />
+                    </button>
+                    <button onClick={handleReconstructImage} className="action-button" title="Reconstruct in 3D">
+                      <CubeIcon />
+                    </button>
+                    <button onClick={handleGenerateAudio} disabled={isAudioLoading} className="action-button" title="Describe Room">
+                      {isAudioLoading 
+                        ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                        : <SoundIcon />
+                      }
+                    </button>
+                    {audioUrl && (
+                        <button onClick={() => new Audio(audioUrl).play()} className="action-button" title="Play Description">
+                            <PlayIcon />
+                        </button>
+                    )}
+                    <div className="h-6 w-px bg-white/20 mx-1"></div>
+                    <button onClick={handleSaveImage} className="action-button" title="Save Image">
+                      <DownloadIcon />
+                    </button>
+                    {navigator.share && <button onClick={handleShareImage} className="action-button" title="Share Image">
+                      <ShareIcon />
+                    </button>}
+                  </>
+                )}
+
+              </div>
+            </div>
+          )}
         </div>
+        
         {error && (<div className="p-4 bg-red-900 text-red-200 text-center">{error}</div>)}
-        <footer className="p-6 border-t border-gray-700">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-            <div className="flex justify-center md:justify-start space-x-3 order-3 md:order-1 mt-4 md:mt-0">
-              {imageUrl && !reconstructionUrl && (
-                <>
-                  <button onClick={handleSaveImage} className="bg-gray-700 hover:bg-gray-600 py-2 px-4 rounded-lg transition-colors">Save</button>
-                  {navigator.share && (<button onClick={handleShareImage} className="bg-gray-700 hover:bg-gray-600 py-2 px-4 rounded-lg transition-colors">Share</button>)}
-                </>
-              )}
+        
+        <footer className="p-6 border-t border-gray-700 flex justify-center">
+            <div className="w-full max-w-xs">
+                {renderActionButton()}
             </div>
-            <div className="order-1 md:order-2">{renderActionButton()}</div>
-            <div className="flex justify-center md:justify-end space-x-3 flex-wrap gap-2 order-2 md:order-3">
-              {imageUrl && !reconstructionUrl && (
-                <>
-                  <button onClick={handleSegmentImage} className="bg-pink-600 hover:bg-pink-700 py-2 px-4 rounded-lg transition-colors">Magic Edit</button>
-                  <button onClick={handleReconstructImage} className="bg-yellow-600 hover:bg-yellow-700 py-2 px-4 rounded-lg transition-colors">Reconstruct in 3D</button>
-                  {!audioUrl && (
-                    <button onClick={handleGenerateAudio} disabled={isAudioLoading} className="bg-cyan-600 hover:bg-cyan-700 py-2 px-4 rounded-lg disabled:bg-cyan-800 disabled:cursor-not-allowed transition-colors">
-                      {isAudioLoading ? 'Describing...' : 'Describe Room'}
-                    </button>
-                  )}
-                  {audioUrl && (
-                    <button onClick={() => new Audio(audioUrl).play()} className="bg-green-600 hover:bg-green-700 py-2 px-4 rounded-lg transition-colors">
-                      ▶️ Play Description
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-          {reconstructionUrl && modelInfo && (
-             <div className="mt-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
-               <div className="flex items-center justify-between mb-3">
-                 <h3 className="text-lg font-semibold text-white">3D Model Ready</h3>
-                 <button onClick={() => { setReconstructionUrl(null); setModelInfo(null); }} className="text-gray-400 hover:text-white">Close</button>
-               </div>
-               <div className="flex flex-wrap gap-3 mb-3">
-                 <button onClick={handleDownloadGLB} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg">Download GLB</button>
-                 <button onClick={handleOpenGLB} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">Open in New Tab</button>
-                 <button onClick={handleCopyGLBUrl} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg">Copy URL</button>
-               </div>
-             </div>
-           )}
         </footer>
       </main>
     </div>
