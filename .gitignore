@@ -155,3 +155,29 @@ node_modules/
 
 # Ignore Markdown documentation files
 *.md
+
+
+
+
+
+
+
+##########################################
+# --------------------------------------------------------------
+# Documentation
+# --------------------------------------------------------------
+# Ignore all markdown files inside the 'docs' folder by default
+docs/*.md
+
+# But UN-IGNORE the specific, polished files we want to share
+# These files MUST be included in the repository for the public links to work.
+!docs/HACKATHON_READY_SUMMARY.md
+!docs/LOCAL_FIRST_PHILOSOPHY.md
+!docs/ULTRA_3D_IMPROVEMENTS.md
+!docs/CHARACTER_INTERACTION_SYSTEM.md
+!docs/FIXES_APPLIED.md
+!docs/DEPLOYMENT_GUIDE.md
+!docs/LM_STUDIO_SETUP.md
+!docs/ELEGANT_MASCOT_BREEDS.md
+
+##########################################
