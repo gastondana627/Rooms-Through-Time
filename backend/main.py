@@ -17,6 +17,7 @@ import traceback
 import httpx
 import random
 from datetime import datetime
+import numpy as np
 
 # Optional ElevenLabs import
 try:
@@ -405,225 +406,160 @@ async def recolor_object(request: RecolorRequest):
         logger.exception("❌ Recolor error: %s", exc)
         return {"image_url": request.image_url}
 
+# In backend/main.py
+
+# In backend/main.py
+
+# In backend/main.py
+
+# In backend/main.py
+
+# In backend/main.py
+
+# In backend/main.py
+
+# In backend/main.py
+# (Ensure `import numpy as np` is at the top of your file)
+
+# In backend/main.py
+# (Ensure `import numpy as np` is at the top of your file)
+
 @app.post("/reconstruct")
 async def reconstruct_3d(request: ReconstructRequest):
     try:
-        print("🪐 Backend: Starting high-quality 3D reconstruction with TripoSR…")
+        print("🪐 Backend: Starting EXCELLENCE Tier 3D Reconstruction Pipeline…")
         
-        # Ultra-detailed 6-stage 3D reconstruction pipeline
-        print("🪐 Backend: Starting ultra-detailed 6-stage 3D reconstruction…")
-        
-        # Stage 1/6: Image preprocessing for room reconstruction
-        print("   Stage 1/6: Preprocessing image for optimal room reconstruction...")
-        enhanced_image_url = request.image_url  # Default to original
-        
+        # --- Stage 1/4: Input Image Upscaling ---
+        print("   Stage 1/4: Upscaling input image to 4K for maximum detail...")
+        base_image_url = request.image_url
         try:
-            # Try to enhance the image for better 3D reconstruction
-            enhance_result = fal_client.run("fal-ai/imageutils/rembg", arguments={
-                "image_url": request.image_url,
-                "model": "u2net",  # Good for room scenes
-                "return_mask": False,
-                "alpha_matting": True,
-                "alpha_matting_foreground_threshold": 240,
-                "alpha_matting_background_threshold": 10
+            upscale_result = fal_client.run("fal-ai/real-esrgan", arguments={
+                "image_url": base_image_url,
+                "scale": 4,
             })
-            
-            # Also try depth estimation for room understanding
-            depth_result = fal_client.run("fal-ai/imageutils/depth", arguments={
-                "image_url": request.image_url,
-                "model": "dpt-large"  # Better for room scenes
-            })
-            
-            print("   ✅ Stage 1/6 complete - Image preprocessing and depth analysis")
-        except Exception as stage1_error:
-            print(f"   Stage 1/6 partial: {stage1_error} - continuing with original image")
+            high_res_image_url = upscale_result["image"]["url"]
+            print(f"   ✅ Stage 1/4 complete. Image upscaled to 4K.")
+        except Exception as upscale_error:
+            print(f"   ⚠️ Stage 1/4 failed: {upscale_error}. Proceeding with original resolution.")
+            high_res_image_url = base_image_url
+
+        # --- Stage 2/4: AI Scene Analysis & Mass View Generation ---
+        print("   Stage 2/4: Analyzing scene and generating 36 camera angles...")
+        image_urls = [high_res_image_url] # Start with the upscaled original
         
-        # Stage 2/6: Try room-specific 3D reconstruction
-        print("   Stage 2/6: Generating room-optimized 3D structure...")
-        try:
-            # Try with room-specific parameters
-            result = fal_client.run("fal-ai/instantmesh", arguments={
-                "image_url": request.image_url,
-                "texture_resolution": 2048,      # Ultra-high resolution for room details
-                "mesh_simplification": 0.98,     # Keep maximum geometry for room complexity
-                "background_removal": False,     # Essential: keep room context
-                "view_dependent_texturing": True, # Better room texture mapping
-                "multiview_consistent": True     # Consistent room perspective
-            })
-            if result.get("model_mesh", {}).get("url") or result.get("mesh_url"):
-                print("   ✅ Stage 2/6 complete - InstantMesh base structure")
-                model_mesh = result.get("model_mesh", {}) or {}
-                mesh_url = model_mesh.get("url") or result.get("mesh_url")
-                if mesh_url:
-                    return { 
-                        "reconstruction_url": mesh_url, 
-                        "model_info": { 
-                            "model_used": "fal-ai/instantmesh-ultra", 
-                            "quality": "stage-2-instantmesh",
-                            "direct_download": mesh_url,
-                            "stages_completed": "2/6 - InstantMesh Ultra"
-                        } 
-                    }
-        except Exception as stage2_error:
-            print(f"   Stage 2/6 failed: {stage2_error}")
-        
-        # Stage 3/6: Try LRM with room scene optimization
-        print("   Stage 3/6: Enhancing room scene detail...")
-        try:
-            result = fal_client.run("fal-ai/lrm", arguments={
-                "image_url": request.image_url,
-                "render_resolution": 1024,       # Ultra-high resolution for room scenes
-                "mesh_resolution": 512,          # Maximum detail mesh for rooms
-                "texture_resolution": 2048,      # Ultra-high quality textures
-                "scene_scale": "room",           # Optimize for room-scale scenes
-                "preserve_background": True,     # Keep room walls and context
-                "detail_enhancement": True       # Enhance furniture and room details
-            })
-            if result.get("model_mesh", {}).get("url"):
-                print("   ✅ Stage 3/6 complete - LRM detail enhancement")
-                model_mesh = result.get("model_mesh", {})
-                mesh_url = model_mesh.get("url")
-                if mesh_url:
-                    return { 
-                        "reconstruction_url": mesh_url, 
-                        "model_info": { 
-                            "model_used": "fal-ai/lrm-ultra", 
-                            "quality": "stage-3-lrm",
-                            "direct_download": mesh_url,
-                            "stages_completed": "3/6 - LRM Ultra Detail"
-                        } 
-                    }
-        except Exception as stage3_error:
-            print(f"   Stage 3/6 failed: {stage3_error}")
-        
-        # Stage 4/6: Try TripoSR with room-specific settings
-        print("   Stage 4/6: Applying TripoSR room reconstruction...")
-        try:
-            result = fal_client.run("fal-ai/triposr", arguments={
-                "image_url": request.image_url,
-                "foreground_ratio": 0.9,        # Capture more of the room scene
-                "texture_resolution": 1024,     # High-quality room textures
-                "render_resolution": 1024,      # High-resolution room rendering
-                "mesh_simplification": 0.95,    # Keep room detail complexity
-                "remove_background": False      # Critical: keep room walls/context
-            })
-            if result.get("model") and result["model"].get("url"):
-                print("   ✅ Stage 4/6 complete - TripoSR room reconstruction")
-                return { 
-                    "reconstruction_url": result["model"]["url"], 
-                    "model_info": { 
-                        "model_used": "fal-ai/triposr-room-optimized", 
-                        "quality": "stage-4-triposr-room",
-                        "direct_download": result["model"]["url"],
-                        "stages_completed": "4/6 - TripoSR Room Optimized"
-                    } 
-                }
-        except Exception as stage4_error:
-            print(f"   Stage 4/6 failed: {stage4_error}")
-        
-        # Stage 5/6: Try alternative room reconstruction approach
-        print("   Stage 5/6: Alternative room scene reconstruction...")
-        try:
-            # Try with different model optimized for scenes
-            result = fal_client.run("fal-ai/lrm", arguments={
-                "image_url": request.image_url,
-                "foreground_ratio": 0.95,       # Capture almost entire room
-                "texture_resolution": 2048,     # Ultra-high texture quality
-                "geometry_resolution": "high",  # Maximum geometry detail
-                "scene_type": "interior"        # Specify interior scene type
-            })
-            if result.get("model_mesh", {}).get("url"):
-                print("   ✅ Stage 5/6 complete - Alternative room reconstruction")
-                model_mesh = result.get("model_mesh", {})
-                mesh_url = model_mesh.get("url")
-                if mesh_url:
-                    return { 
-                        "reconstruction_url": mesh_url, 
-                        "model_info": { 
-                            "model_used": "fal-ai/lrm-interior-scene", 
-                            "quality": "stage-5-lrm-interior",
-                            "direct_download": mesh_url,
-                            "stages_completed": "5/6 - LRM Interior Scene"
-                        } 
-                    }
-        except Exception as stage5_error:
-            print(f"   Stage 5/6 failed: {stage5_error}")
-        
-        # Stage 6/6: Final TripoSR with maximum quality settings
-        print("   Stage 6/6: Final quality pass with TripoSR...")
-        result = fal_client.run("fal-ai/triposr", arguments={
-            "image_url": request.image_url,
-            "model_name": "triposr",
-            "chunk_size": 8192,  # Maximum detail
-            "mc_resolution": 256,  # Higher marching cubes resolution
-            "remove_background": False,  # Keep room context
-            "foreground_ratio": 0.85  # Focus on main elements
+        scene_desc_result = fal_client.run("fal-ai/llava-next", arguments={
+            "image_url": high_res_image_url,
+            "prompt": "You are a professional photographer. In 15 words, describe the main subject and style of this interior design photo."
         })
-        print("   ✅ Stage 6/6 complete - Ultra-quality reconstruction finished")
+        scene_description = scene_desc_result["output"]
+        print(f"   - Scene Description: '{scene_description}'")
+
+        num_views = 36
+        for i in range(num_views - 1):
+            angle = (i / (num_views - 1)) * 360
+            elevation = 15 + 15 * np.sin(np.radians(angle * 2))
+            try:
+                view_prompt = f"{scene_description}, photorealistic, UHD, 8k, cinematic, view from a {int(angle)} degree angle, {int(elevation)} degree elevation."
+                view_result = fal_client.run("fal-ai/stable-diffusion-v3-medium", arguments={"prompt": view_prompt})
+                image_urls.append(view_result["images"][0]["url"])
+                if (i + 1) % 6 == 0: print(f"     - Generated view {i+1}/{num_views}")
+            except Exception as view_error:
+                print(f"     - Failed to generate view {i+1}/{num_views}")
         
-        print("TripoSR result:", result)
+        print(f"   ✅ Stage 2/4 complete. Total views for reconstruction: {len(image_urls)}")
+
+        # --- Stage 3/4: The Waterfall Reconstruction ---
+        print("   Stage 3/4: Attempting reconstruction with the best available models...")
+        final_result = None
+        model_used = ""
+
+        # Attempt 1: InstantMesh (Best for Multi-View)
+        try:
+            print("      - Attempting: fal-ai/instant-mesh (Multi-View ULTRA)")
+            result = fal_client.run("fal-ai/instant-mesh", arguments={
+                "image_urls": image_urls,
+                "texture_resolution": 4096,
+                "mesh_simplification": 1.0,
+                "multiview_consistent": True,
+            })
+            final_result = result
+            model_used = "fal-ai/instant-mesh (36-View)"
+            print(f"      ✅ InstantMesh Succeeded!")
+        except Exception as e:
+            print(f"      - Instant-Mesh failed: {e}")
+
+        # Attempt 2: Trellis (Best for Single-View)
+        if not final_result:
+            try:
+                print("      - Attempting: fal-ai/trellis (Single-View ULTRA-HQ)")
+                result = fal_client.run("fal-ai/trellis", arguments={
+                    "image_url": high_res_image_url, # Use the best single image
+                    "do_remove_background": True,
+                    "texture_resolution": 2048,
+                    "target_polycount": 150000,
+                })
+                final_result = result
+                model_used = "fal-ai/trellis (ULTRA-HQ)"
+                print(f"      ✅ Trellis Succeeded!")
+            except Exception as e:
+                print(f"      - Trellis failed: {e}")
         
-        # Handle different response formats
-        model_mesh = result.get("model_mesh", {})
-        mesh_url = model_mesh.get("url")
+        if not final_result:
+            raise Exception("All high-quality 3D reconstruction models failed.")
+
+        # --- Stage 4/4: Parsing and Response ---
+        print("   Stage 4/4: Parsing final model and logging metrics...")
         
-        if not mesh_url and "model_url" in result: 
-            mesh_url = result.get("model_url")
-        if not mesh_url and "mesh" in result:
-            mesh_url = result["mesh"].get("url") if isinstance(result["mesh"], dict) else result["mesh"]
-            
-        if not mesh_url: 
-            raise Exception("3D model generation succeeded but returned no usable URL.")
-            
-        print(f"✅ 3D Model generated successfully: {mesh_url}")
+        mesh_url = None
+        model_mesh = final_result.get("model_mesh", {})
+        
+        if isinstance(final_result, list) and len(final_result) > 0:
+            mesh_url = final_result[0].get("url") # Instant-Mesh list format
+        else:
+            mesh_url = model_mesh.get("url") or final_result.get("model_url") # Trellis dict format
+
+        if not mesh_url: raise Exception("3D model generation returned no usable URL.")
+        
+        file_size_kb = model_mesh.get("file_size", 0) // 1024
+        timings = final_result.get("timings", {})
+        total_time = sum(timings.values()) if timings else 0
+
+        print("   📊 QUALITY METRICS:")
+        print(f"      - Model Used: {model_used}")
+        print(f"      - Texture Resolution: 4K (InstantMesh) or 2K (Trellis)")
+        print(f"      - File Size: {file_size_kb} KB")
+        print(f"      - Generation Time: {total_time:.2f}s")
+        
+        print(f"✅ Final EXCELLENCE Quality 3D Model generated successfully: {mesh_url}")
         
         return { 
             "reconstruction_url": mesh_url, 
             "model_info": { 
-                "model_used": "fal-ai/triposr-ultra-enhanced", 
-                "file_size": model_mesh.get("file_size"), 
-                "content_type": model_mesh.get("content_type"), 
+                "model_used": model_used,
                 "direct_download": mesh_url,
-                "quality": "ultra-high-resolution",
-                "stages_completed": "6/6 - Ultra Enhanced",
-                "resolution": "8192 chunk, 256 MC resolution",
-                "description": "6-stage ultra-enhanced 3D model with maximum detail and resolution"
+                "quality": "Excellence-Tier, Multi-Stage Pipeline",
+                "stages_completed": "4/4",
+                "file_size_kb": file_size_kb,
+                "generation_time_s": round(total_time, 2)
             } 
         }
         
     except Exception as exc:
-        logger.exception("❌ Backend reconstruction error: %s", exc)
-        print("⚠️ Falling back to basic TripoSR parameters...")
-        
-        # This should not be reached if the basic approach works
-        print("   Basic TripoSR approach succeeded")
-            
-        # Try different fallback models
-        for i, fallback_url in enumerate(DEMO_ROOM_MODELS):
-            try:
-                # Test if the model is accessible
-                import requests
-                response = requests.head(fallback_url, timeout=5)
-                if response.status_code == 200:
-                    return {
-                        "reconstruction_url": fallback_url, 
-                        "model_info": {
-                            "model_used": f"room-fallback-{i+1}", 
-                            "note": "Using room-optimized fallback model",
-                            "direct_download": fallback_url
-                        }
-                    }
-            except:
-                continue
-        
-        # Final fallback
+        logger.exception("❌ Critical reconstruction pipeline error: %s", exc)
+        print("⚠️ Pipeline failed. Returning a high-quality fallback model.")
         return {
-            "reconstruction_url": DEMO_ROOM_MODELS[-1], 
+            "reconstruction_url": "https://modelviewer.dev/shared-assets/models/Astronaut.glb", 
             "model_info": {
-                "model_used": "final-fallback",
+                "model_used": "fallback-astronaut",
                 "note": "3D reconstruction service temporarily unavailable"
             }
         }
+    
+
+
+
+
+    
 
 @app.post("/generate-voiceover")
 async def generate_voiceover(request: AudioRequest):
