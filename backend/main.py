@@ -90,11 +90,21 @@ app.add_middleware(
 # --------------------------------------------------------------
 FAL_KEY = os.getenv("FAL_KEY")
 if not FAL_KEY:
-    print("❌ ERROR: FAL_KEY environment variable is required")
+    print("=" * 60)
+    print("❌ WARNING: FAL_KEY environment variable is NOT SET")
+    print("   Image generation will NOT work!")
     print("   Please set FAL_KEY in your Railway environment variables")
-    print("   Current environment variables:", list(os.environ.keys()))
-    raise ValueError("FAL_KEY environment variable is required")
-print(f"✅ FAL API key configured successfully (starts with: {FAL_KEY[:20]}...)")
+    print("=" * 60)
+    print("   Available environment variables:")
+    for key in sorted(os.environ.keys()):
+        if not key.startswith("_"):
+            print(f"     - {key}")
+    print("=" * 60)
+    # Don't crash - let the app start so we can see logs
+    FAL_KEY = "MISSING_KEY"
+else:
+    print(f"✅ FAL API key configured successfully (starts with: {FAL_KEY[:20]}...)")
+
 fal_client.api_key = FAL_KEY
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
