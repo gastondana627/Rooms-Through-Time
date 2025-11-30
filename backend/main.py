@@ -64,7 +64,13 @@ except Exception:
 # --------------------------------------------------------------
 # 1️⃣  Load env-vars & start FastAPI
 # --------------------------------------------------------------
-load_dotenv()
+# Load .env file if it exists (for local development)
+# Railway injects env vars directly, so this is optional
+if os.path.exists('.env'):
+    load_dotenv()
+elif os.path.exists('backend/.env'):
+    load_dotenv('backend/.env')
+
 app = FastAPI(title="AI Room Designer API")
 logger = logging.getLogger("uvicorn.error")
 
@@ -84,8 +90,11 @@ app.add_middleware(
 # --------------------------------------------------------------
 FAL_KEY = os.getenv("FAL_KEY")
 if not FAL_KEY:
+    print("❌ ERROR: FAL_KEY environment variable is required")
+    print("   Please set FAL_KEY in your Railway environment variables")
+    print("   Current environment variables:", list(os.environ.keys()))
     raise ValueError("FAL_KEY environment variable is required")
-print("✅ FAL API key configured successfully")
+print(f"✅ FAL API key configured successfully (starts with: {FAL_KEY[:20]}...)")
 fal_client.api_key = FAL_KEY
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
@@ -153,6 +162,23 @@ def image_to_base64(image: Image.Image, fmt: str = "JPEG") -> str:
 # ==============================================================
 # API ROUTES
 # ==============================================================
+@app.get("/")
+async def root():
+    """Simple root endpoint to verify server is running"""
+    return {
+        "status": "online",
+        "app": "AI Room Designer API",
+        "version": "1.0.0",
+        "deployment_mode": DEPLOYMENT_MODE,
+        "endpoints": {
+            "health": "/health",
+            "generate": "/generate-fal-image",
+            "redesign": "/redesign-fal-image",
+            "reconstruct": "/reconstruct",
+            "chat": "/chat-with-avatar"
+        }
+    }
+
 @app.get("/health")
 async def health_check():
     """Comprehensive health check showing local-first architecture status"""
