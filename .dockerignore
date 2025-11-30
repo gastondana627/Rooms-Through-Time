@@ -1,0 +1,11 @@
+node_modules
+venv
+__pycache__
+*.pyc
+.git
+.env.local
+.env.production
+dist
+.vercel
+.vscode
+*.log
