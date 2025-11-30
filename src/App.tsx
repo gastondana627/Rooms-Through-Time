@@ -734,8 +734,11 @@ const App: React.FC = () => {
             max-camera-orbit="auto auto 5m"
             field-of-view="35deg"
             interaction-prompt="auto"
+            loading="eager"
+            reveal="auto"
             style={{ width: '100%', height: '100%' }}
-            onError={e => { console.error('model-viewer load error:', e); setError('Unable to load the 3‑D model.'); setReconstructionUrl(null); }}
+            onLoad={() => console.log('✅ 3D model loaded successfully')}
+            onError={e => { console.error('❌ model-viewer load error:', e, 'URL:', reconstructionUrl); setError('Unable to load the 3D model. Click "Copy Model URL" to view it directly.'); }}
           />
           {/* 3D Model Controls - Bottom Bar */}
           <div className="absolute bottom-4 left-4 right-4 flex justify-center">
